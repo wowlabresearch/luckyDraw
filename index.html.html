@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>럭키 드럼</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap">
+<style>
+  :root{
+    --paper:#F6F4EC;
+    --surface:#FFFFFF;
+    --ink:#15161A;
+    --ink-soft:#54565E;
+    --line:#15161A;
+    --pop-blue:#1E4FFF;
+    --pop-red:#FF3B2F;
+    --pop-yellow:#FFC72C;
+    --pop-green:#00A66C;
+    --pop-purple:#7C4DFF;
+    --pop-orange:#FF7A1E;
+    --good:#00A66C;
+    --danger:#FF3B2F;
+    --shadow-sm:3px 3px 0 var(--ink);
+    --shadow-md:5px 5px 0 var(--ink);
+    --font-display:'Libre Franklin',system-ui,sans-serif;
+    --font-body:'Libre Franklin',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  }
+  /* Flat, hairline-and-flat-color look on purpose — no dark mode, no gradients. */
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--font-body);
+    padding:20px 16px 40px;
+    min-height:100vh;
+  }
+  ::selection{background:var(--pop-yellow);}
+  .wrap{max-width:1180px;margin:0 auto;}
+
+  /* ---- header ---- */
+  .top{
+    display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:18px;
+  }
+  .brand{display:flex;flex-direction:column;gap:2px;}
+  .brand .eyebrow{
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;font-weight:700;
+    color:var(--pop-blue);text-transform:uppercase;
+  }
+  .brand h1{
+    font-family:var(--font-display);font-weight:900;
+    font-size:clamp(28px,5vw,40px);line-height:.95;margin:2px 0 0;
+    letter-spacing:-.01em;text-wrap:balance;
+  }
+  .status-strip{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    font-family:var(--font-mono);font-size:12px;color:var(--ink);
+  }
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--surface);border:2px solid var(--line);
+    padding:5px 10px;border-radius:0;font-weight:600;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ink);opacity:.2;flex:none;}
+  .dot.on{background:var(--good);opacity:1;}
+  .dot.shake{background:var(--pop-red);opacity:1;animation:pulse 0.5s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  @media (prefers-reduced-motion: reduce){.dot.shake{animation:none;}}
+
+  /* ---- setup card ---- */
+  .card{
+    background:var(--surface);border:2.5px solid var(--line);
+    border-radius:0;padding:22px;box-shadow:var(--shadow-md);
+  }
+  .setup{max-width:640px;margin:0 auto;}
+  .setup h2{
+    font-family:var(--font-display);font-weight:900;font-size:26px;margin:0 0 6px;letter-spacing:-.01em;
+  }
+  .setup p{color:var(--ink-soft);font-size:14.5px;line-height:1.6;margin:0 0 18px;}
+  .role-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;}
+  @media (max-width:520px){.role-grid{grid-template-columns:1fr;}}
+  .role-btn{
+    background:var(--surface);border:2.5px solid var(--line);
+    border-radius:0;padding:16px 14px;text-align:left;cursor:pointer;
+    color:var(--ink);font-family:var(--font-body);
+    box-shadow:var(--shadow-sm);
+    transition:transform .08s,box-shadow .08s,background .1s;
+  }
+  .role-btn:hover{background:#FBFAF5;}
+  .role-btn:active{transform:translate(2px,2px);box-shadow:0 0 0 var(--ink);}
+  .role-btn.selected{background:var(--pop-yellow);}
+  .role-btn .r-icon{font-size:22px;}
+  .role-btn .r-title{font-weight:800;font-size:15.5px;margin:8px 0 3px;}
+  .role-btn .r-desc{font-size:12.5px;color:var(--ink-soft);line-height:1.5;}
+  .role-btn.selected .r-desc{color:var(--ink);}
+  label.field-label{
+    display:block;font-size:12px;font-weight:700;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--ink-soft);margin:0 0 8px;
+  }
+  textarea#rosterInput{
+    width:100%;min-height:150px;resize:vertical;
+    background:var(--paper);border:2.5px solid var(--line);border-radius:0;
+    color:var(--ink);font-family:var(--font-mono);font-size:13.5px;line-height:1.65;
+    padding:12px 14px;outline:none;
+  }
+  textarea#rosterInput:focus{background:var(--surface);}
+  input#viewerCodeInput{
+    width:100%;text-align:center;text-transform:uppercase;letter-spacing:.18em;
+    background:var(--paper);border:2.5px solid var(--line);border-radius:0;
+    color:var(--ink);font-family:var(--font-mono);font-size:22px;font-weight:700;
+    padding:14px;outline:none;
+  }
+  input#viewerCodeInput:focus{background:var(--surface);}
+  .setup-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;flex-wrap:wrap;}
+  .count-readout{font-family:var(--font-mono);font-size:12.5px;color:var(--ink-soft);}
+  .count-readout b{color:var(--pop-blue);font-size:15px;}
+
+  button{font-family:var(--font-body);cursor:pointer;}
+  .btn{
+    padding:12px 20px;border-radius:0;font-weight:800;font-size:14.5px;
+    background:var(--surface);color:var(--ink);border:2.5px solid var(--line);
+    box-shadow:var(--shadow-sm);
+    transition:transform .08s,box-shadow .08s,background .1s;
+  }
+  .btn:hover{background:#FBFAF5;}
+  .btn:active{transform:translate(3px,3px);box-shadow:0 0 0 var(--ink);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;transform:none;}
+  .btn-primary{background:var(--pop-blue);color:#fff;}
+  .btn-primary:hover{background:#1642DB;}
+  .btn-ghost{background:var(--paper);box-shadow:none;}
+  .btn-ghost:active{box-shadow:none;}
+  .btn-danger{color:var(--danger);}
+
+  /* ---- machine layout ---- */
+  .layout{display:grid;grid-template-columns:1fr;gap:16px;}
+  @media (min-width:860px){.layout{grid-template-columns:1fr 320px;align-items:start;}}
+
+  .machine{
+    background:var(--surface);border:2.5px solid var(--line);
+    border-radius:0;padding:16px;box-shadow:var(--shadow-md);
+  }
+  .drum-frame{
+    position:relative;border-radius:0;
+    border:3px solid var(--line);
+    overflow:hidden;
+  }
+  .drum-glass{
+    position:relative;overflow:hidden;
+    background-color:var(--paper);
+    aspect-ratio:1000/650;
+  }
+  canvas#drum{width:100%;height:100%;display:block;position:relative;}
+  .phase-readout{
+    position:absolute;top:10px;left:10px;z-index:2;
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;font-weight:700;
+    background:var(--ink);color:var(--paper);
+    padding:5px 10px;border-radius:0;
+  }
+
+  .deck{margin-top:14px;display:flex;flex-direction:column;gap:12px;}
+  .peer-code-row{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    background:var(--paper);border:2px solid var(--line);padding:10px 12px;
+    font-family:var(--font-mono);font-size:12.5px;
+  }
+  .peer-code-row .code-big{
+    font-size:20px;font-weight:800;letter-spacing:.14em;color:var(--pop-blue);
+  }
+  .peer-code-row .btn{padding:6px 12px;font-size:11.5px;}
+  .peer-code-row .hint{color:var(--ink-soft);}
+  .shake-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  #shakeBtn{
+    flex:1 1 200px;padding:18px 20px;font-size:16px;
+    background:var(--pop-red);border:2.5px solid var(--line);
+    color:#fff;border-radius:0;font-weight:800;letter-spacing:.01em;
+    box-shadow:var(--shadow-md);
+    user-select:none;-webkit-user-select:none;touch-action:none;
+    transition:transform .08s,box-shadow .08s;
+  }
+  #shakeBtn.engaged{transform:translate(4px,4px);box-shadow:0 0 0 var(--ink);}
+  .meter{
+    height:10px;border-radius:0;background:var(--paper);overflow:hidden;
+    border:2px solid var(--line);flex:1 1 140px;
+  }
+  .meter > i{display:block;height:100%;width:0%;background:var(--pop-yellow);transition:width .08s linear;}
+  .deck-controls{display:flex;gap:8px;flex-wrap:wrap;}
+  .sensor-note{font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);}
+  .debug-wrap{border:2px solid var(--line);background:var(--surface);}
+  .debug-legend{
+    display:flex;align-items:center;gap:10px;padding:6px 8px;
+    border-bottom:2px solid var(--line);
+    font-family:var(--font-mono);font-size:11px;font-weight:700;
+  }
+  .debug-legend .sw{width:9px;height:9px;display:inline-block;margin-right:4px;border:1px solid var(--ink);vertical-align:-1px;}
+  .debug-legend .debug-hint{margin-left:auto;color:var(--ink-soft);font-weight:500;}
+  #debugGraph{display:block;width:100%;height:90px;}
+  .viewer-note{
+    text-align:center;color:var(--ink-soft);font-size:13.5px;
+    padding:14px;font-family:var(--font-mono);
+  }
+
+  /* ---- sidebar ---- */
+  .sidebar{display:flex;flex-direction:column;gap:16px;}
+  .panel-title{
+    font-family:var(--font-display);font-weight:800;font-size:17px;
+    display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;
+  }
+  .panel-title span.n{font-family:var(--font-mono);font-weight:600;font-size:12px;color:var(--ink-soft);}
+  .roster-list{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:2px;}
+  .roster-row{
+    display:flex;align-items:center;gap:8px;font-size:13px;
+    padding:6px 8px;border-radius:0;background:var(--paper);border:1.5px solid var(--line);
+  }
+  .roster-row .swatch{width:11px;height:11px;border-radius:50%;flex:none;border:1.5px solid var(--ink);}
+  .roster-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .result-list{display:flex;flex-direction:column;gap:6px;}
+  .result-row{
+    display:flex;align-items:center;gap:10px;
+    background:var(--paper);border:1.5px solid var(--line);border-radius:0;padding:8px 10px;
+    opacity:0;transform:translateY(6px);
+    animation:riseIn .35s ease forwards;
+  }
+  @media (prefers-reduced-motion: reduce){.result-row{animation:none;opacity:1;transform:none;}}
+  @keyframes riseIn{to{opacity:1;transform:translateY(0);}}
+  .result-row .rk{
+    font-family:var(--font-mono);font-weight:700;color:var(--pop-blue);
+    width:26px;text-align:right;font-variant-numeric:tabular-nums;
+  }
+  .result-row .swatch{width:11px;height:11px;border-radius:50%;flex:none;border:1.5px solid var(--ink);}
+  .result-row .nm{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .empty-note{color:var(--ink-soft);font-size:12.5px;font-family:var(--font-mono);}
+  #resultActions{display:flex;gap:8px;margin-top:10px;}
+  #resultActions .btn{flex:1;padding:9px 12px;font-size:12.5px;}
+
+  .hidden{display:none!important;}
+  a.link-reset{color:var(--ink-soft);font-size:12px;text-decoration:underline;cursor:pointer;background:none;font-family:var(--font-mono);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="brand">
+      <span class="eyebrow">SHAKE &amp; DRAW</span>
+      <h1>럭키 드럼</h1>
+    </div>
+    <div class="status-strip">
+      <span class="pill"><i class="dot" id="dotController"></i>컨트롤러 <span id="cntController">0</span></span>
+      <span class="pill"><i class="dot" id="dotViewer"></i>관전자 <span id="cntViewer">0</span></span>
+      <span class="pill" id="roleTag">역할: 미선택</span>
+    </div>
+  </div>
+
+  <!-- SETUP -->
+  <section class="card setup" id="setupCard">
+    <h2>명단을 넣고 흔들 준비를 하세요</h2>
+    <p>흔들기 담당(폰)은 명단을 붙여넣고 시작하면 연결 코드가 생성돼요. 관전(랩탑 등)은 그 코드를 입력하면 실시간으로 같은 화면을 그대로 보여드려요.</p>
+
+    <div class="role-grid">
+      <button class="role-btn" id="pickController" type="button">
+        <div class="r-icon">📱</div>
+        <div class="r-title">흔들기 담당</div>
+        <div class="r-desc">이 기기를 흔들어 자이로 센서로 공을 움직입니다. 보통 폰에서 선택하세요.</div>
+      </button>
+      <button class="role-btn" id="pickViewer" type="button">
+        <div class="r-icon">🖥️</div>
+        <div class="r-title">관전만 하기</div>
+        <div class="r-desc">흔드는 화면을 실시간으로 그대로 보여줍니다. 랩탑·다른 폰에서 선택하세요.</div>
+      </button>
+    </div>
+
+    <div id="controllerSetupFields">
+      <label class="field-label" for="rosterInput">참가자 명단</label>
+      <textarea id="rosterInput" placeholder="예시)&#10;김민준&#10;이서연&#10;박도윤&#10;최하은&#10;..."></textarea>
+      <div class="setup-foot">
+        <span class="count-readout">인식된 인원: <b id="rosterCount">0</b>명</span>
+        <button class="btn btn-primary" id="startBtn" disabled>저장하고 시작</button>
+      </div>
+    </div>
+
+    <div id="viewerSetupFields" class="hidden">
+      <label class="field-label" for="viewerCodeInput">흔들기 담당 기기의 연결 코드</label>
+      <input id="viewerCodeInput" type="text" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="예: 7F3KQ">
+      <div class="setup-foot">
+        <span class="count-readout" id="viewerConnectStatus">폰 화면에 뜬 5자리 코드를 입력하세요</span>
+        <button class="btn btn-primary" id="viewerConnectBtn" type="button">연결하기</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- MACHINE -->
+  <section class="layout hidden" id="machineLayout">
+    <div class="machine">
+      <div class="drum-frame">
+        <div class="drum-glass">
+          <canvas id="drum"></canvas>
+          <div class="phase-readout" id="phaseReadout">대기중</div>
+        </div>
+      </div>
+
+      <div class="deck" id="controllerDeck">
+        <div class="peer-code-row">
+          <span>연결 코드</span>
+          <span class="code-big" id="peerCodeText">생성 중…</span>
+          <button class="btn btn-ghost" id="copyCodeBtn" type="button">코드 복사</button>
+          <span class="hint">관전 기기에서 이 코드를 입력하세요</span>
+        </div>
+        <div class="shake-row">
+          <button id="shakeBtn">탭해서 자이로 켜기</button>
+          <div class="meter"><i id="meterFill"></i></div>
+        </div>
+        <div class="deck-controls">
+          <button class="btn" id="reshuffleBtn">다시 흔들기</button>
+          <button class="btn" id="newRoundBtn">새 라운드</button>
+          <button class="btn btn-ghost" id="editRosterBtn">명단 변경</button>
+        </div>
+        <div class="sensor-note" id="sensorNote">자이로 센서: 확인 중…</div>
+        <div class="debug-wrap">
+          <div class="debug-legend">
+            <span><i class="sw" style="background:#FF3B2F"></i>X</span>
+            <span><i class="sw" style="background:#1E4FFF"></i>Y</span>
+            <span><i class="sw" style="background:#00A66C"></i>Z</span>
+            <span class="debug-hint">실시간 가속도 (디버그)</span>
+          </div>
+          <canvas id="debugGraph" height="90"></canvas>
+        </div>
+        <div class="sensor-note">iOS에서 흔드는 도중 "실행 취소" 팝업이 뜨면 설정 → 손쉬운 사용 → 터치 → "흔들어서 실행 취소"를 꺼주세요.</div>
+      </div>
+
+      <div class="viewer-note hidden" id="viewerNote">관전 모드 · 컨트롤러가 흔드는 대로 실시간으로 보여드려요</div>
+    </div>
+
+    <aside class="sidebar">
+      <div class="card">
+        <div class="panel-title">참가 명단 <span class="n" id="rosterPanelCount">0명</span></div>
+        <div class="roster-list" id="rosterList"></div>
+      </div>
+      <div class="card">
+        <div class="panel-title">결과 <span class="n" id="resultPanelState">대기중</span></div>
+        <div class="result-list" id="resultList">
+          <div class="empty-note">흔들기가 멈추면 여기에 순위가 표시돼요.</div>
+        </div>
+        <div id="resultActions" class="hidden">
+          <button class="btn" id="copyResultBtn">순위 복사</button>
+        </div>
+      </div>
+      <button class="link-reset" id="fullResetBtn">전체 초기화 (명단 처음부터)</button>
+    </aside>
+  </section>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* ============================= constants ============================= */
+  var WORLD_W = 1000, WORLD_H = 650;
+  var TICK_MS = 70;          // broadcast interval to viewers while a round is live
+  var SHAKE_ON = 7;          // m/s^2 deviation to count as "shaking"
+  var SHAKE_OFF_HOLD = 650;  // ms below threshold before we call it "stopped"
+  var SETTLE_SPEED = 0.06;   // matter.js body.speed considered "at rest"
+  var SETTLE_HOLD = 550;     // ms all bodies must stay under SETTLE_SPEED
+  var SETTLE_TIMEOUT = 7000; // hard cap so a round can't hang forever
+  var PEER_ID_PREFIX = "luckydrum7f3-"; // namespaces our ids on the public PeerJS broker
+
+  var HANGUL_RE = /[ㄱ-힝]/;
+  var NUMERIC_RE = /^[0-9]+$/;
+
+  // The "back wall" rectangle for the fake-3D box: balls at depth z=1 are drawn
+  // shrunk and shifted toward this rect; z=0 sits at the true (real, physics) x/y.
+  var BOX_BACK = { x0: WORLD_W*0.14, x1: WORLD_W*0.86, y0: WORLD_H*0.09, y1: WORLD_H*0.80 };
+  var BOX_BACK_SCALE_X = (BOX_BACK.x1-BOX_BACK.x0) / WORLD_W;
+  var BOX_BACK_SCALE_Y = (BOX_BACK.y1-BOX_BACK.y0) / WORLD_H;
+
+  /* ============================= dom refs ============================= */
+  var $ = function(id){ return document.getElementById(id); };
+  var setupCard = $("setupCard"), machineLayout = $("machineLayout");
+  var controllerSetupFields = $("controllerSetupFields"), viewerSetupFields = $("viewerSetupFields");
+  var rosterInput = $("rosterInput"), rosterCount = $("rosterCount"), startBtn = $("startBtn");
+  var viewerCodeInput = $("viewerCodeInput"), viewerConnectBtn = $("viewerConnectBtn"), viewerConnectStatus = $("viewerConnectStatus");
+  var pickController = $("pickController"), pickViewer = $("pickViewer");
+  var controllerDeck = $("controllerDeck"), viewerNote = $("viewerNote");
+  var shakeBtn = $("shakeBtn"), meterFill = $("meterFill"), sensorNote = $("sensorNote");
+  var reshuffleBtn = $("reshuffleBtn"), newRoundBtn = $("newRoundBtn"), editRosterBtn = $("editRosterBtn");
+  var fullResetBtn = $("fullResetBtn");
+  var phaseReadout = $("phaseReadout"), roleTag = $("roleTag");
+  var rosterList = $("rosterList"), rosterPanelCount = $("rosterPanelCount");
+  var resultList = $("resultList"), resultPanelState = $("resultPanelState"), resultActions = $("resultActions");
+  var copyResultBtn = $("copyResultBtn");
+  var dotController = $("dotController"), dotViewer = $("dotViewer");
+  var cntController = $("cntController"), cntViewer = $("cntViewer");
+  var peerCodeText = $("peerCodeText"), copyCodeBtn = $("copyCodeBtn");
+  var canvas = $("drum");
+  var ctx = canvas.getContext("2d");
+  var debugCanvas = $("debugGraph");
+  var debugCtx = debugCanvas.getContext("2d");
+
+  var PHASE_LABEL = {idle:"대기중", ready:"준비됨 · 흔들어보세요", shaking:"흔드는 중", settling:"멈추는 중", done:"완료"};
+
+  /* ============================= state ============================= */
+  var role = null;          // 'controller' | 'viewer'
+  var roster = [];          // string[]
+  var phase = "idle";
+  var roundId = 0;
+  var balls = [];           // render mirrors: {x,y,a,r,color,label}
+  var lastTickAt = 0, prevSnap = null, curSnap = null; // for viewer interpolation
+
+  /* ============================= peerjs sync layer ============================= */
+  // Standalone build: no Claude Artifact db/room capabilities are available here,
+  // so phone<->laptop sync runs over WebRTC via PeerJS's free public signaling
+  // broker (no account/signup, no server of our own). The controller ("host")
+  // opens a Peer under a short human-readable code; each viewer opens its own
+  // throwaway Peer and connects directly to that code. Once a DataConnection is
+  // open the host pushes a full state snapshot immediately (covers late joiners),
+  // then streams the same tick/event messages the physics loop already produces.
+  var peer = null;            // this device's own Peer object (host or viewer)
+  var viewerConns = [];       // host only: open DataConnections to each viewer
+  var hostConn = null;        // viewer only: the DataConnection to the controller
+  var peerCode = null;        // host only: the short code viewers type in
+
+  function randomCode(len){
+    var chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I — easy to read aloud
+    var s = "";
+    for (var i=0;i<len;i++) s += chars[Math.floor(Math.random()*chars.length)];
+    return s;
+  }
+
+  function updatePeerStatusUI(){
+    if (role === "controller"){
+      dotController.classList.add("on");
+      cntController.textContent = "1";
+      var vCount = viewerConns.filter(function(c){ return c.open; }).length;
+      cntViewer.textContent = String(vCount);
+      dotViewer.classList.toggle("on", vCount > 0);
+    }
+  }
+
+  function initHostPeer(){
+    if (peer) return; // already hosting — keep the same code across "새 라운드"/roster edits
+    peerCode = randomCode(5);
+    peer = new Peer(PEER_ID_PREFIX + peerCode, { debug: 1 });
+    peer.on("open", function(){
+      peerCodeText.textContent = peerCode;
+      updatePeerStatusUI();
+    });
+    peer.on("connection", function(conn){
+      viewerConns.push(conn);
+      conn.on("open", function(){
+        updatePeerStatusUI();
+        sendFullStateTo(conn);
+      });
+      conn.on("close", function(){
+        viewerConns = viewerConns.filter(function(c){ return c !== conn; });
+        updatePeerStatusUI();
+      });
+      conn.on("error", function(){});
+    });
+    peer.on("error", function(err){
+      peerCodeText.textContent = "오류";
+      sensorNote.textContent = "연결 오류: " + (err && err.type ? err.type : String(err));
+    });
+  }
+
+  function viewerConnect(rawCode){
+    var code = (rawCode || "").trim().toUpperCase();
+    if (!code){ viewerConnectStatus.textContent = "코드를 입력하세요"; return; }
+    if (peer){ peer.destroy(); peer = null; }
+    hostConn = null;
+    viewerConnectStatus.textContent = "연결 중…";
+    viewerConnectBtn.disabled = true;
+    peer = new Peer(PEER_ID_PREFIX + "v" + Math.random().toString(36).slice(2,8), { debug: 1 });
+    peer.on("open", function(){
+      hostConn = peer.connect(PEER_ID_PREFIX + code, { reliable: true });
+      hostConn.on("open", function(){
+        viewerConnectStatus.textContent = "연결됨 · 실시간 수신 중";
+        viewerConnectBtn.disabled = false;
+        dotController.classList.add("on");
+        cntController.textContent = "1";
+        dotViewer.classList.add("on");
+        cntViewer.textContent = "1";
+      });
+      hostConn.on("data", handlePeerMessage);
+      hostConn.on("close", function(){
+        viewerConnectStatus.textContent = "연결이 끊겼어요 · 다시 연결해보세요";
+        viewerConnectBtn.disabled = false;
+        dotController.classList.remove("on");
+        cntController.textContent = "0";
+      });
+      hostConn.on("error", function(){
+        viewerConnectStatus.textContent = "연결 실패 · 코드를 확인하세요";
+        viewerConnectBtn.disabled = false;
+      });
+    });
+    peer.on("error", function(err){
+      viewerConnectStatus.textContent = "연결 실패 · 코드를 확인하세요 (" + (err && err.type ? err.type : "오류") + ")";
+      viewerConnectBtn.disabled = false;
+    });
+  }
+
+  function broadcastToViewers(msg){
+    viewerConns.forEach(function(c){ if (c.open) c.send(msg); });
+  }
+  function broadcastTick(){
+    if (!viewerConns.length) return;
+    var payload = balls.map(function(b){ return [Math.round(b.x), Math.round(b.y*10)/10, Math.round(b.a*100)/100, Math.round((b.z||0)*100)/100]; });
+    broadcastToViewers({ kind:"tick", roundId: roundId, phase: phase, b: payload });
+  }
+  function broadcastEvent(type, data){
+    data = data || {};
+    data.kind = "event";
+    data.type = type;
+    broadcastToViewers(data);
+  }
+  function sendFullStateTo(conn){
+    conn.send({
+      kind: "full",
+      roster: roster, phase: phase, roundId: roundId,
+      balls: balls.map(function(b){ return [Math.round(b.x), Math.round(b.y), Math.round((b.z||0)*100)/100]; }),
+      ranking: lastRanking
+    });
+  }
+
+  function handlePeerMessage(msg){
+    if (!msg || role === "controller") return;
+    if (msg.kind === "tick") onRoomTick(msg);
+    else if (msg.kind === "event") onRoomEvent(msg);
+    else if (msg.kind === "full") applyFullState(msg);
+  }
+
+  function onRoomTick(msg){
+    if (!msg) return;
+    if (msg.roundId) roundId = msg.roundId;
+    prevSnap = curSnap;
+    curSnap = { t: performance.now(), b: msg.b };
+    if (msg.phase) setPhase(msg.phase, true);
+  }
+
+  function onRoomEvent(msg){
+    if (!msg) return;
+    if (msg.type === "init"){
+      roster = msg.roster || roster;
+      roundId = msg.roundId;
+      renderRosterList();
+      resultActions.classList.add("hidden");
+      resultList.innerHTML = '<div class="empty-note">흔들기가 멈추면 여기에 순위가 표시돼요.</div>';
+      resultPanelState.textContent = "대기중";
+      setPhase("ready", true);
+      prevSnap = curSnap = null;
+      if (setupCard.classList.contains("hidden") === false) enterMachine();
+    } else if (msg.type === "result"){
+      if (msg.roundId === roundId) showResult(msg.ranking, true);
+    } else if (msg.type === "reset"){
+      roster = []; roundId = 0;
+      machineLayout.classList.add("hidden");
+      setupCard.classList.remove("hidden");
+    }
+  }
+
+  function applyFullState(msg){
+    if (!msg) return;
+    if (Array.isArray(msg.roster) && msg.roster.length){
+      roster = msg.roster.slice();
+      renderRosterList();
+    }
+    if (msg.roundId) roundId = msg.roundId;
+    if (Array.isArray(msg.balls)) applySnapshotBalls(msg.balls);
+    setPhase(msg.phase || "idle", true);
+    if (msg.phase === "done" && Array.isArray(msg.ranking)) showResult(msg.ranking, true);
+    prevSnap = curSnap = null;
+    if (setupCard.classList.contains("hidden") === false && roster.length) enterMachine();
+  }
+
+  function applySnapshotBalls(pairs){
+    var n = roster.length;
+    balls = pairs.map(function(p, i){
+      return { x:p[0], y:p[1], a:0, r:radiusFor(n), z:p[2]||0, color: colorFor(i), textColor: textColorFor(i), label: labelFor(roster[i]||"") };
+    });
+  }
+
+  /* ============================= roster parsing ============================= */
+  function parseRoster(text){
+    return text.split("\n").map(function(s){ return s.trim(); }).filter(Boolean);
+  }
+  function updateRosterCount(){
+    var n = parseRoster(rosterInput.value).length;
+    rosterCount.textContent = n;
+    startBtn.disabled = n < 2;
+  }
+  rosterInput.addEventListener("input", updateRosterCount);
+  viewerCodeInput.addEventListener("input", function(){
+    var v = viewerCodeInput.value.toUpperCase();
+    viewerCodeInput.value = v;
+  });
+
+  var BALL_PALETTE = [
+    {bg:"#FF3B2F", tx:"#FFFFFF"}, {bg:"#1E4FFF", tx:"#FFFFFF"},
+    {bg:"#FFC72C", tx:"#15161A"}, {bg:"#00A66C", tx:"#FFFFFF"},
+    {bg:"#7C4DFF", tx:"#FFFFFF"}, {bg:"#FF7A1E", tx:"#15161A"},
+    {bg:"#00AEEF", tx:"#15161A"}, {bg:"#FF4FA3", tx:"#15161A"}
+  ];
+  function colorFor(i){ return BALL_PALETTE[i % BALL_PALETTE.length].bg; }
+  function textColorFor(i){ return BALL_PALETTE[i % BALL_PALETTE.length].tx; }
+  function labelFor(name){
+    if (NUMERIC_RE.test(name)) return name.slice(0,4);
+    if (HANGUL_RE.test(name)) return name.slice(0,2);
+    return name.slice(0,3).toUpperCase();
+  }
+  function radiusFor(n){
+    var areaPerBall = 0.22 * (WORLD_W*WORLD_H) / Math.max(n,1);
+    var r = Math.sqrt(areaPerBall / Math.PI);
+    return Math.max(16, Math.min(55, r));
+  }
+
+  function renderRosterList(){
+    rosterPanelCount.textContent = roster.length + "명";
+    rosterList.innerHTML = "";
+    roster.forEach(function(name, i){
+      var row = document.createElement("div");
+      row.className = "roster-row";
+      var sw = document.createElement("span");
+      sw.className = "swatch"; sw.style.background = colorFor(i, roster.length);
+      var nm = document.createElement("span");
+      nm.className = "nm"; nm.textContent = name;
+      row.appendChild(sw); row.appendChild(nm);
+      rosterList.appendChild(row);
+    });
+  }
+
+  /* ============================= role selection ============================= */
+  pickController.addEventListener("click", function(){ selectRole("controller"); });
+  pickViewer.addEventListener("click", function(){ selectRole("viewer"); });
+
+  function selectRole(r){
+    role = r;
+    pickController.classList.toggle("selected", r === "controller");
+    pickViewer.classList.toggle("selected", r === "viewer");
+    roleTag.textContent = "역할: " + (r === "controller" ? "흔들기 담당" : "관전");
+    controllerSetupFields.classList.toggle("hidden", r === "viewer");
+    viewerSetupFields.classList.toggle("hidden", r !== "viewer");
+  }
+
+  startBtn.addEventListener("click", function(){
+    var list = parseRoster(rosterInput.value);
+    if (list.length < 2) return;
+    if (!role) selectRole("controller");
+    roster = list;
+    renderRosterList();
+    roundId = Date.now();
+    enterMachine();
+    if (role === "controller"){
+      buildWorld();
+      setPhase("ready");
+      initHostPeer();
+      broadcastEvent("init", { roster: roster, roundId: roundId });
+    }
+  });
+
+  viewerConnectBtn.addEventListener("click", function(){
+    if (!role) selectRole("viewer");
+    viewerConnect(viewerCodeInput.value);
+  });
+
+  function enterMachine(){
+    setupCard.classList.add("hidden");
+    machineLayout.classList.remove("hidden");
+    controllerDeck.classList.toggle("hidden", role !== "controller");
+    viewerNote.classList.toggle("hidden", role === "controller");
+    resizeCanvas();
+    if (role === "controller") setupSensors();
+    else { dotViewer.classList.add("on"); cntViewer.textContent = "1"; }
+    // iOS's own "Shake to Undo" feature watches for device shaking right after any
+    // recent text edit and pops up its system alert — it's what was interrupting
+    // shaking here. Dropping focus out of the roster textarea removes the most
+    // obvious trigger for it; the rest is an iOS setting (see sensor note below).
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+
+  editRosterBtn.addEventListener("click", function(){
+    machineLayout.classList.add("hidden");
+    setupCard.classList.remove("hidden");
+  });
+
+  copyCodeBtn.addEventListener("click", function(){
+    if (!peerCode) return;
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(peerCode).then(function(){
+        copyCodeBtn.textContent = "복사됨!";
+        setTimeout(function(){ copyCodeBtn.textContent = "코드 복사"; }, 1400);
+      }).catch(function(){});
+    }
+  });
+
+  fullResetBtn.addEventListener("click", function(){
+    if (!confirm("명단과 결과를 모두 초기화할까요?")) return;
+    roster = []; balls = []; lastRanking = null; roundId = 0;
+    rosterInput.value = ""; updateRosterCount();
+    setPhase("idle");
+    machineLayout.classList.add("hidden");
+    setupCard.classList.remove("hidden");
+    broadcastEvent("reset", { roundId: 0 });
+    if (peer){ peer.destroy(); peer = null; }
+    if (hostConn){ hostConn.close(); hostConn = null; }
+    viewerConns = []; peerCode = null;
+    peerCodeText.textContent = "생성 중…";
+    dotController.classList.remove("on","shake");
+    dotViewer.classList.remove("on");
+    cntController.textContent = "0"; cntViewer.textContent = "0";
+  });
+
+  /* ============================= canvas sizing ============================= */
+  function resizeCanvas(){
+    var rect = canvas.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    var drect = debugCanvas.getBoundingClientRect();
+    if (drect.width){
+      debugCanvas.width = Math.round(drect.width * dpr);
+      debugCanvas.height = Math.round(90 * dpr);
+    }
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function drawDebugGraph(){
+    var w = debugCanvas.width, h = debugCanvas.height;
+    if (!w || !h) return;
+    debugCtx.clearRect(0,0,w,h);
+    debugCtx.fillStyle = "#FFFFFF";
+    debugCtx.fillRect(0,0,w,h);
+    var range = 24; // m/s^2 shown top-to-bottom
+    var midY = h/2;
+    // zero line
+    debugCtx.strokeStyle = "rgba(21,22,26,.25)";
+    debugCtx.lineWidth = 1;
+    debugCtx.beginPath(); debugCtx.moveTo(0, midY); debugCtx.lineTo(w, midY); debugCtx.stroke();
+    function traceLine(arr, color){
+      if (arr.length < 2) return;
+      debugCtx.strokeStyle = color;
+      debugCtx.lineWidth = Math.max(1.5, w/DEBUG_BUF_LEN*0.9);
+      debugCtx.beginPath();
+      for (var i=0;i<arr.length;i++){
+        var x = (i/(DEBUG_BUF_LEN-1)) * w;
+        var y = midY - (arr[i]/range) * midY;
+        if (i===0) debugCtx.moveTo(x,y); else debugCtx.lineTo(x,y);
+      }
+      debugCtx.stroke();
+    }
+    traceLine(debugBuf.ax, "#FF3B2F");
+    traceLine(debugBuf.ay, "#1E4FFF");
+    traceLine(debugBuf.az, "#00A66C");
+    // stale indicator: if no real motion event recently, say so right on the graph
+    if (role === "controller" && sensorActive && performance.now() - lastMotionEventAt > 500){
+      debugCtx.fillStyle = "#FF3B2F";
+      debugCtx.font = "700 " + Math.max(10, h*0.16) + "px 'JetBrains Mono', monospace";
+      debugCtx.fillText("신호 끊김", 6, 14);
+    }
+  }
+
+  /* ============================= matter.js world (controller only) ============================= */
+  var engine, world, wallBodies = [], ballBodies = [], ballDepth = [];
+  var shakeEngaged = false, shakeIntensity = 0;
+  var lastAboveOnAt = 0, belowSinceAt = 0, settleQuietSinceAt = 0;
+
+  function buildWorld(){
+    var M = Matter;
+    engine = M.Engine.create({ positionIterations: 10, velocityIterations: 8 });
+    engine.gravity.y = 1;
+    world = engine.world;
+
+    var t = 60; // wall thickness — extra margin against high-speed tunneling
+    wallBodies = [
+      M.Bodies.rectangle(WORLD_W/2, -t/2, WORLD_W + t*2, t, { isStatic:true }),
+      M.Bodies.rectangle(WORLD_W/2, WORLD_H + t/2, WORLD_W + t*2, t, { isStatic:true }),
+      M.Bodies.rectangle(-t/2, WORLD_H/2, t, WORLD_H + t*2, { isStatic:true }),
+      M.Bodies.rectangle(WORLD_W + t/2, WORLD_H/2, t, WORLD_H + t*2, { isStatic:true })
+    ];
+    M.World.add(world, wallBodies);
+
+    var r = radiusFor(roster.length);
+    var cols = Math.max(1, Math.floor((WORLD_W - 40) / (r*2 + 8)));
+    ballBodies = roster.map(function(name, i){
+      var col = i % cols, row = Math.floor(i / cols);
+      var x = 30 + r + col * (r*2 + 8) + (Math.random()*6-3);
+      var y = 30 + r + row * (r*2 + 8);
+      var body = M.Bodies.circle(x, y, r, {
+        // low restitution + higher friction = a thud-and-tumble weight, not a bouncy-ball feel
+        restitution: 0.22, friction: 0.25, frictionAir: 0.015, density: 0.0028
+      });
+      body.plugin = { name: name, color: colorFor(i), textColor: textColorFor(i), label: labelFor(name) };
+      return body;
+    });
+    M.World.add(world, ballBodies);
+    // Depth (z) is not real 2D-physics collision — it's a lightweight parallel state
+    // per ball, driven by the phone's z-axis (front/back) acceleration, that fakes
+    // "into the box / out toward you" motion so the box doesn't feel like a single
+    // flat plane. 0 = right up against the front glass, 1 = pressed to the back wall.
+    ballDepth = ballBodies.map(function(){ return { z: 0.25 + Math.random()*0.35, vz: 0 }; });
+    balls = composeBalls();
+  }
+
+  function bodyToRenderBall(b, i){
+    var d = ballDepth[i] || { z: 0 };
+    return { x:b.position.x, y:b.position.y, a:b.angle, r:b.circleRadius, color:b.plugin.color, textColor:b.plugin.textColor, label:b.plugin.label, z:d.z };
+  }
+  function composeBalls(){
+    return ballBodies.map(bodyToRenderBall);
+  }
+
+  // Advances the fake depth axis: pushed by real z-axis shake, always spring-damped
+  // back toward a relaxed resting depth, and it bounces off the front glass (z=0)
+  // and the back wall (z=1) the same way the x/y axes bounce off the real walls.
+  function updateDepth(dtScale){
+    var shaking = (phase === "shaking");
+    var rest = 0.3;
+    var springK = shaking ? 0.0026 : 0.018;
+    var damp = shaking ? 0.90 : 0.80;
+    ballDepth.forEach(function(d){
+      if (shaking){
+        d.vz += (smGz * 0.00075 + (Math.random()-0.5) * 0.0016 * clamp(shakeIntensity,0,26)) * dtScale;
+      }
+      d.vz += (rest - d.z) * springK * dtScale;
+      d.vz *= damp;
+      d.z += d.vz * dtScale;
+      if (d.z < 0){ d.z = 0; d.vz *= -0.35; }
+      if (d.z > 1){ d.z = 1; d.vz *= -0.35; }
+    });
+  }
+
+  var lastRanking = null;
+
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+  // Runs every frame, in every phase, for as long as a round exists — this is not
+  // a "while shaking" special case. Sign mapping (derived from the DeviceMotion
+  // spec's axis convention, where the accelerometer reads the *opposite* of true
+  // gravity): device +Y (toward the top of the phone) is screen/world "up", so
+  // world.y keeps device g.y's sign; device +X (right) matches world +X directly,
+  // but true gravity is -g, so world.x flips sign relative to g.x.
+  function updateGravityFromSensor(){
+    if (!engine) return;
+    if (sensorActive){
+      engine.gravity.x = clamp(-smGx / GDIV, -6, 6);
+      engine.gravity.y = clamp(smGy / GDIV, -6, 6);
+    } else {
+      engine.gravity.x = 0;
+      engine.gravity.y = 1; // plain default gravity until/unless we ever get real sensor data
+    }
+  }
+
+  // Fallback ONLY for when there is no real sensor at all (denied/unsupported) —
+  // undirected jitter while the button is held, layered on top of the plain
+  // default gravity above. Never runs alongside real sensor data.
+  function applyFallbackJitter(dtScale){
+    var M = Matter;
+    var jitterMag = clamp(shakeIntensity, 0, 26);
+    ballBodies.forEach(function(b){
+      var kJitter = 0.0011 * jitterMag * dtScale;
+      M.Body.applyForce(b, b.position, {
+        x: (Math.random()-0.5) * kJitter * b.mass,
+        y: (Math.random()-0.5) * kJitter * 0.9 * b.mass
+      });
+    });
+  }
+
+  var MAX_BALL_SPEED = 18; // world-units/step safety cap — keeps the "heavy object" feel and stops tunneling
+  function capBallMotion(){
+    var M = Matter;
+    ballBodies.forEach(function(b){
+      var v = b.velocity;
+      var sp = Math.sqrt(v.x*v.x + v.y*v.y);
+      if (sp > MAX_BALL_SPEED){
+        var s = MAX_BALL_SPEED / sp;
+        M.Body.setVelocity(b, { x: v.x*s, y: v.y*s });
+      }
+      // safety net: if a ball ever tunnels past the walls, put it straight back in bounds
+      var p = b.position, r = b.circleRadius, margin = 3;
+      if (p.x < -margin || p.x > WORLD_W+margin || p.y < -margin || p.y > WORLD_H+margin){
+        M.Body.setPosition(b, { x: clamp(p.x, r, WORLD_W-r), y: clamp(p.y, r, WORLD_H-r) });
+        M.Body.setVelocity(b, { x: 0, y: 0 });
+      }
+    });
+  }
+
+  /* ============================= sensor input ============================= */
+  var usingFallback = false;
+  var sensorActive = false; // true once we've received at least one real devicemotion reading
+
+  function setupSensors(){
+    var supported = typeof DeviceMotionEvent !== "undefined";
+    if (supported && typeof DeviceMotionEvent.requestPermission === "function"){
+      sensorNote.textContent = "자이로 센서: 아래 버튼을 한 번 탭하면 권한을 요청해요";
+    } else if (supported){
+      window.addEventListener("devicemotion", onDeviceMotion);
+      sensorNote.textContent = "자이로 센서: 연결됨 · 폰을 흔들어보세요";
+      shakeBtn.textContent = "자이로 연결됨 · 흔들어보세요";
+    } else {
+      usingFallback = true;
+      sensorNote.textContent = "자이로 센서 없음 · 버튼을 누르고 있는 동안 흔들기를 시뮬레이션합니다";
+    }
+  }
+
+  // IMPORTANT: this must be called synchronously, directly inside a real "click"
+  // event handler and nothing earlier in the gesture (not pointerdown/touchstart).
+  // iOS WebKit only honors requestPermission() when it's invoked from that exact
+  // kind of event; calling it from pointerdown (which fires *before* click) burns
+  // the gesture on a call WebKit silently treats as invalid and auto-denies, so a
+  // later, legitimate click-triggered call never gets a chance to run. We also
+  // deliberately do NOT set a permanent "already asked" flag on denial, so the
+  // button can be tapped again to retry (denials from an invalid gesture context
+  // are not the same as the user actually choosing "Don't Allow").
+  var motionGranted = false;
+  function ensureMotionPermission(){
+    if (motionGranted) return;
+    if (typeof DeviceMotionEvent === "undefined" || typeof DeviceMotionEvent.requestPermission !== "function") return;
+    DeviceMotionEvent.requestPermission().then(function(res){
+      if (res === "granted"){
+        motionGranted = true;
+        window.addEventListener("devicemotion", onDeviceMotion);
+        sensorNote.textContent = "자이로 센서: 연결됨 · 이제 버튼 없이 폰을 흔들면 바로 반응해요";
+        shakeBtn.textContent = "자이로 연결됨 · 흔들어보세요";
+      } else {
+        usingFallback = true;
+        sensorNote.textContent = "자이로 권한 거부됨 — 다시 한 번 탭해서 재시도해보세요. 계속 거부되면 Safari로 열어보세요 (Chrome 등 일부 iOS 브라우저는 이 권한 요청 자체를 지원하지 않을 수 있어요). 그 전까지는 버튼을 누르고 있는 동안만 시뮬레이션합니다.";
+      }
+    }).catch(function(err){
+      usingFallback = true;
+      sensorNote.textContent = "자이로 권한 요청 실패(" + (err && err.message ? err.message : "오류") + ") · 다시 탭해서 재시도하거나 Safari로 열어보세요";
+    });
+  }
+
+  // NEW MODEL: "the phone IS the box". Rather than trying to detect a discrete
+  // "shake" and inject a separate force, we just point the physics engine's own
+  // gravity directly at the phone's raw accelerationIncludingGravity every frame.
+  // At rest that vector IS gravity (properly rotated for however you're holding
+  // the phone — tilt the phone, the box tilts). While shaking, that same reading
+  // swings wildly in magnitude and direction because it's total sensed
+  // acceleration (gravity + the phone's own motion) — which is exactly the
+  // pseudo-force a container's contents feel while the container is thrown
+  // around. One physical quantity, no separate "shake detector" needed.
+  var GDIV = 9.81; // 1g, so a resting phone reproduces matter.js's normal-feeling default gravity
+  var smGx = 0, smGy = 0, smGz = 0;
+  var lastMotionEventAt = 0, motionEventCount = 0;
+  // ring buffer of raw ax/ay/az for the on-screen debug graph
+  var DEBUG_BUF_LEN = 160;
+  var debugBuf = { ax: [], ay: [], az: [] };
+  function pushDebugSample(ax, ay, az){
+    debugBuf.ax.push(ax); debugBuf.ay.push(ay); debugBuf.az.push(az);
+    if (debugBuf.ax.length > DEBUG_BUF_LEN){
+      debugBuf.ax.shift(); debugBuf.ay.shift(); debugBuf.az.shift();
+    }
+  }
+  function onDeviceMotion(e){
+    var g = e.accelerationIncludingGravity;
+    if (!g || typeof g.x !== "number") return; // some browsers fire an event with no data at all — ignore those, don't count them as "active"
+    sensorActive = true;
+    motionEventCount++;
+    lastMotionEventAt = performance.now();
+    var gx = g.x||0, gy = g.y||0, gz = g.z||0;
+    pushDebugSample(gx, gy, gz);
+    // light smoothing only — enough to tame raw sensor jitter, not enough to blunt a real shake
+    smGx = smGx*0.55 + gx*0.45;
+    smGy = smGy*0.55 + gy*0.45;
+    smGz = smGz*0.55 + gz*0.45;
+    var totalMag = Math.sqrt(gx*gx + gy*gy + gz*gz);
+    registerIntensity(Math.abs(totalMag - GDIV)); // how far this reading departs from "just sitting there at 1g"
+  }
+
+  // Press-and-hold fallback / manual override — only takes over when there is no
+  // real sensor feeding data, so it never fights an active gyro reading. Does NOT
+  // touch the permission request — see the note above ensureMotionPermission().
+  function pressStart(){
+    shakeBtn.classList.add("engaged");
+    fallbackHold = true;
+  }
+  function pressEnd(){
+    shakeBtn.classList.remove("engaged");
+    fallbackHold = false;
+    if (!sensorActive) registerIntensity(0); // force a below-threshold reading so "stopped" can be detected
+  }
+  var fallbackHold = false;
+  shakeBtn.addEventListener("pointerdown", pressStart);
+  shakeBtn.addEventListener("pointerup", pressEnd);
+  shakeBtn.addEventListener("pointerleave", pressEnd);
+  shakeBtn.addEventListener("pointercancel", pressEnd);
+  // the ONLY place the permission request is triggered — a real "click" event,
+  // which is what iOS WebKit actually requires (see note above the function).
+  shakeBtn.addEventListener("click", ensureMotionPermission);
+
+  var lastDebugPaint = 0;
+  function registerIntensity(mag){
+    shakeIntensity = mag;
+    var pct = Math.max(0, Math.min(100, (mag / 22) * 100));
+    meterFill.style.width = pct + "%";
+    var now = performance.now();
+    if (mag > SHAKE_ON){
+      lastAboveOnAt = now;
+      if (phase === "ready" || phase === "done") { setPhase("shaking"); }
+      belowSinceAt = 0;
+    } else if (phase === "shaking") {
+      if (!belowSinceAt) belowSinceAt = now;
+    }
+    // live readout so it's obvious on-screen whether real sensor data is flowing,
+    // instead of having to guess
+    if (sensorActive && now - lastDebugPaint > 120){
+      lastDebugPaint = now;
+      sensorNote.textContent = "자이로: 연결됨 · 이벤트 " + motionEventCount +
+        "개 · 편차 " + mag.toFixed(1) + " · g(" + smGx.toFixed(1) + ", " + smGy.toFixed(1) + ", " + smGz.toFixed(1) + ")";
+    }
+  }
+
+  /* ============================= physics tick loop (controller) ============================= */
+  var lastFrame = 0;
+  function controllerLoop(ts){
+    if (!lastFrame) lastFrame = ts;
+    var dt = Math.min(34, ts - lastFrame);
+    lastFrame = ts;
+    requestAnimationFrame(controllerLoop);
+    if (role !== "controller" || !engine) return;
+
+    if (fallbackHold && !sensorActive){ registerIntensity(18); }
+
+    updateGravityFromSensor(); // every frame, every phase — the box always follows however the phone is actually oriented/moving right now
+
+    if (phase === "shaking"){
+      if (!sensorActive) applyFallbackJitter(dt/16.67); // only when there's truly no sensor data to drive gravity itself
+      if (belowSinceAt && performance.now() - belowSinceAt > SHAKE_OFF_HOLD){
+        setPhase("settling");
+        settleQuietSinceAt = 0;
+      }
+    }
+
+    Matter.Engine.update(engine, dt);
+    capBallMotion();
+    updateDepth(dt/16.67);
+    balls = composeBalls();
+
+    if (phase === "settling"){
+      var maxSpeed = 0;
+      ballBodies.forEach(function(b){ maxSpeed = Math.max(maxSpeed, b.speed); });
+      var quiet = maxSpeed < SETTLE_SPEED;
+      if (quiet){
+        if (!settleQuietSinceAt) settleQuietSinceAt = performance.now();
+        if (performance.now() - settleQuietSinceAt > SETTLE_HOLD) finishRound();
+      } else {
+        settleQuietSinceAt = 0;
+      }
+      if (!settleStartedAt) settleStartedAt = performance.now();
+      if (performance.now() - settleStartedAt > SETTLE_TIMEOUT) finishRound();
+    } else {
+      settleStartedAt = 0;
+    }
+
+    drawScene();
+    drawDebugGraph();
+
+    tickAccum += dt;
+    if (tickAccum > TICK_MS && (phase==="shaking" || phase==="settling" || phase==="ready" || phase==="done")){
+      tickAccum = 0;
+      broadcastTick();
+    }
+  }
+  var settleStartedAt = 0, tickAccum = 0;
+
+  function finishRound(){
+    var ranked = ballBodies.slice().sort(function(a,b){
+      if (Math.abs(a.position.x - b.position.x) > 2) return a.position.x - b.position.x;
+      return a.position.y - b.position.y;
+    }).map(function(b){ return b.plugin.name; });
+    lastRanking = ranked;
+    setPhase("done");
+    showResult(ranked, true);
+    broadcastEvent("result", { roundId: roundId, ranking: ranked });
+  }
+
+  reshuffleBtn.addEventListener("click", function(){
+    if (!engine) return;
+    var M = Matter;
+    ballBodies.forEach(function(b){
+      M.Body.setVelocity(b, { x:(Math.random()-0.5)*10, y:(Math.random()-0.5)*10 - 4 });
+    });
+    lastRanking = null;
+    resultActions.classList.add("hidden");
+    setPhase("shaking");
+    registerIntensity(SHAKE_ON + 3);
+  });
+
+  newRoundBtn.addEventListener("click", function(){
+    roundId = Date.now();
+    buildWorld();
+    lastRanking = null;
+    resultActions.classList.add("hidden");
+    setPhase("ready");
+    broadcastEvent("init", { roster: roster, roundId: roundId });
+  });
+
+  /* ============================= viewer render loop ============================= */
+  function viewerLoop(){
+    requestAnimationFrame(viewerLoop);
+    if (role === "controller") return;
+    if (curSnap){
+      var n = roster.length;
+      var r = radiusFor(n);
+      var frac = prevSnap ? Math.min(1, (performance.now() - curSnap.t) / TICK_MS) : 1;
+      balls = curSnap.b.map(function(cur, i){
+        var prev = prevSnap && prevSnap.b[i] ? prevSnap.b[i] : cur;
+        var x = prev[0] + (cur[0]-prev[0]) * frac;
+        var y = prev[1] + (cur[1]-prev[1]) * frac;
+        var z = (prev[3]!=null ? prev[3] : (cur[3]||0)) + ((cur[3]||0) - (prev[3]!=null?prev[3]:(cur[3]||0))) * frac;
+        return { x:x, y:y, a:cur[2], r:r, z:z, color: colorFor(i), textColor: textColorFor(i), label: labelFor(roster[i]||"") };
+      });
+    }
+    drawScene();
+  }
+
+  /* ============================= drawing ============================= */
+  // A simple line-drawn open box (outer frame + a smaller receded back rectangle,
+  // joined at the corners) — the classic flat "box" icon construction. It reads as
+  // a real enclosed volume without any shading or gradient, just hairlines, and it
+  // sits exactly on the physics world bounds so the drawn walls are the real ones.
+  function drawBoxWireframe(){
+    var bx0 = BOX_BACK.x0, by0 = BOX_BACK.y0, bx1 = BOX_BACK.x1, by1 = BOX_BACK.y1;
+    ctx.strokeStyle = "#15161A";
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(bx0, by0, bx1-bx0, by1-by0);
+    ctx.beginPath();
+    ctx.moveTo(bx0, by0); ctx.lineTo(0, 0);
+    ctx.moveTo(bx1, by0); ctx.lineTo(WORLD_W, 0);
+    ctx.moveTo(bx0, by1); ctx.lineTo(0, WORLD_H);
+    ctx.moveTo(bx1, by1); ctx.lineTo(WORLD_W, WORLD_H);
+    ctx.stroke();
+    // floor line (front bottom edge, closest to viewer)
+    ctx.strokeStyle = "rgba(21,22,26,.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, WORLD_H-1); ctx.lineTo(WORLD_W, WORLD_H-1); ctx.stroke();
+  }
+
+  // Projects a true (x,y,r) physics position toward the back rectangle by depth z
+  // (0 = front glass, at its real position; 1 = pressed against the back wall).
+  function projectDepth(px, py, r, z){
+    z = z || 0;
+    var backX = BOX_BACK.x0 + (px/WORLD_W) * (BOX_BACK.x1-BOX_BACK.x0);
+    var backY = BOX_BACK.y0 + (py/WORLD_H) * (BOX_BACK.y1-BOX_BACK.y0);
+    var scale = 1 + (((BOX_BACK_SCALE_X+BOX_BACK_SCALE_Y)/2) - 1) * z;
+    return {
+      x: px + (backX-px) * z,
+      y: py + (backY-py) * z,
+      r: r * scale
+    };
+  }
+
+  function drawScene(){
+    var w = canvas.width, h = canvas.height;
+    if (!w || !h) return;
+    ctx.clearRect(0,0,w,h);
+    var scale = Math.min(w/WORLD_W, h/WORLD_H);
+    var offX = (w - WORLD_W*scale)/2, offY = (h - WORLD_H*scale)/2;
+    ctx.save();
+    ctx.translate(offX, offY);
+    ctx.scale(scale, scale);
+
+    drawBoxWireframe();
+
+    // draw far (larger z) balls first so nearer ones correctly occlude them —
+    // this, plus the size/position shift, is what actually reads as depth
+    var ordered = balls.slice().sort(function(a,b){ return (b.z||0) - (a.z||0); });
+    ordered.forEach(function(b){
+      var p = projectDepth(b.x, b.y, b.r, b.z);
+      ctx.save();
+      ctx.globalAlpha = 1 - (b.z||0) * 0.30; // farther balls fade slightly — an atmospheric depth cue, not a gradient fill
+      ctx.translate(p.x, p.y);
+      ctx.rotate(b.a || 0);
+      // flat fill, thin black hairline — no gradient, no gloss
+      ctx.fillStyle = b.color;
+      ctx.beginPath(); ctx.arc(0,0,p.r,0,Math.PI*2); ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#15161A";
+      ctx.stroke();
+      ctx.rotate(-(b.a||0));
+      ctx.fillStyle = b.textColor || "#15161A";
+      ctx.font = "700 " + Math.max(10, p.r*0.62) + "px 'JetBrains Mono', monospace";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(b.label, 0, 0.5);
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+
+  /* ============================= phase / result UI ============================= */
+  function setPhase(p, fromRemote){
+    phase = p;
+    phaseReadout.textContent = PHASE_LABEL[p] || p;
+    if (role === "controller"){
+      reshuffleBtn.disabled = (p === "shaking");
+      newRoundBtn.disabled = false;
+    }
+    dotController.classList.toggle("shake", p === "shaking");
+  }
+
+  function showResult(ranking, animate){
+    resultPanelState.textContent = "완료";
+    resultActions.classList.remove("hidden");
+    resultList.innerHTML = "";
+    var nameToIndex = {};
+    roster.forEach(function(nm,i){ nameToIndex[nm] = i; });
+    ranking.forEach(function(name, idx){
+      var row = document.createElement("div");
+      row.className = "result-row";
+      if (animate) row.style.animationDelay = (idx * 45) + "ms";
+      var rk = document.createElement("span"); rk.className = "rk"; rk.textContent = (idx+1) + "위";
+      var sw = document.createElement("span"); sw.className = "swatch";
+      sw.style.background = colorFor(nameToIndex[name] != null ? nameToIndex[name] : idx, roster.length);
+      var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = name;
+      row.appendChild(rk); row.appendChild(sw); row.appendChild(nm);
+      resultList.appendChild(row);
+    });
+  }
+
+  copyResultBtn.addEventListener("click", function(){
+    if (!lastRanking && resultList.children.length === 0) return;
+    var lines = Array.prototype.map.call(resultList.querySelectorAll(".result-row"), function(row){
+      return row.querySelector(".rk").textContent + " " + row.querySelector(".nm").textContent;
+    });
+    var text = lines.join("\n");
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){
+        copyResultBtn.textContent = "복사됨!";
+        setTimeout(function(){ copyResultBtn.textContent = "순위 복사"; }, 1400);
+      }).catch(function(){});
+    }
+  });
+
+  /* ============================= boot ============================= */
+  updateRosterCount();
+  requestAnimationFrame(controllerLoop);
+  requestAnimationFrame(viewerLoop);
+})();
+</script>
+</body>
+</html>
