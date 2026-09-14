@@ -788,6 +788,7 @@
     engine = M.Engine.create({ positionIterations: 10, velocityIterations: 8 });
     engine.gravity.y = 1;
     world = engine.world;
+    pocketPositions = null; resultSnapFrom = null;
 
     var t = 60; // wall thickness — extra margin against high-speed tunneling
     wallBodies = [
@@ -805,11 +806,14 @@
       var x = 30 + r + col * (r*2 + 8) + (Math.random()*6-3);
       var y = 30 + r + row * (r*2 + 8);
       var body = M.Bodies.circle(x, y, r, {
-        // livelier than the first pass: lower air/surface friction so balls keep
-        // moving instead of bleeding off speed immediately, higher restitution so
-        // they actually bounce off each other and the walls, lower density so the
-        // same force produces a snappier (lighter-feeling) response
-        restitution: 0.38, friction: 0.12, frictionAir: 0.007, density: 0.0015
+        // "elastic soccer ball" pass: high-ish restitution so they visibly
+        // rebound off each other and the walls instead of just thudding once,
+        // low friction/frictionAir so a bounce doesn't die out immediately,
+        // and a bit more density than before — not for the fall speed (gravity
+        // is mass-independent) but because heavier bodies hit each other with
+        // more momentum, which is what actually reads as "weight" in a pile of
+        // balls being thrown around together
+        restitution: 0.55, friction: 0.06, frictionAir: 0.004, density: 0.0022
       });
       body.plugin = { name: name, color: colorFor(i), textColor: textColorFor(i), label: labelFor(name) };
       return body;
@@ -853,6 +857,48 @@
 
   var lastRanking = null;
 
+  // ============================= pockets (ranking reveal) =============================
+  // The idea: a row of numbered pockets along the box floor, and whichever
+  // pocket a ball ends up in IS its rank — 1st pocket (left) = 1st place. A
+  // literal version of this (N physical holes, exactly ball-sized, built into
+  // the floor) doesn't hold up once N gets into the 30–50 range: at that size
+  // each pocket would be far narrower than a ball, so balls could never
+  // physically settle into their own separate hole while being thrown around.
+  // Instead, physics runs completely freely during shaking (nothing constrains
+  // where balls can go), and the moment a round finishes, every ball animates
+  // — smoothly, from wherever it actually settled — into its own evenly-spaced
+  // pocket slot, ordered by that same final left-to-right position. The
+  // pockets are drawn on the floor throughout so "there are exactly as many
+  // holes as people" reads clearly before the reveal happens.
+  var POCKET_Y_FRAC = 0.86; // how far down the box the pocket row sits
+  var pocketPositions = null; // set by finishRound(): index -> {x,y} target, aligned with ballBodies
+  var resultSnapFrom = null;  // ball render positions captured at the moment the round finished
+  var resultSnapStartAt = 0;
+  var RESULT_SNAP_MS = 550;
+  function pocketMargin(n){ return radiusFor(n) + 14; }
+  function pocketBoundaryX(i, n){ // i in [0, n] — the divider line before pocket i
+    var margin = pocketMargin(n);
+    return margin + (i / n) * (WORLD_W - margin * 2);
+  }
+  function pocketXFor(rankIdx, n){ // center of pocket rankIdx (0-based, left to right)
+    if (n <= 1) return WORLD_W / 2;
+    var margin = pocketMargin(n);
+    return margin + (rankIdx + 0.5) * ((WORLD_W - margin * 2) / n);
+  }
+  function drawPockets(){
+    var n = roster.length;
+    if (!n) return;
+    var y0 = WORLD_H * POCKET_Y_FRAC - 12, y1 = WORLD_H * POCKET_Y_FRAC + 16;
+    ctx.strokeStyle = "rgba(21,22,26,.28)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 1; i < n; i++){
+      var x = pocketBoundaryX(i, n);
+      ctx.moveTo(x, y0); ctx.lineTo(x, y1);
+    }
+    ctx.stroke();
+  }
+
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
   // Manual override — accelerationIncludingGravity's exact sign convention for
@@ -882,8 +928,8 @@
     if (sensorActive){
       var gx = -smGx * gravFlipX, gy = smGy * gravFlipY;
       var mag = Math.sqrt(gx*gx + gy*gy);
-      var baseMag = 1.4;
-      var shakeBoost = (phase === "shaking") ? clamp(shakeIntensity, 0, 26) * 0.05 : 0;
+      var baseMag = 2.4; // clearly heavier than Matter's own "1 = normal" default — real, obvious weight
+      var shakeBoost = (phase === "shaking") ? clamp(shakeIntensity, 0, 26) * 0.09 : 0;
       var gravityMag = baseMag + shakeBoost;
       if (mag > 0.6){ // enough of a clear tilt to trust a direction
         engine.gravity.x = (gx / mag) * gravityMag;
@@ -914,7 +960,7 @@
     var M = Matter;
     var jitterMag = clamp(shakeIntensity, 0, 26);
     ballBodies.forEach(function(b){
-      var kJitter = 0.0021 * jitterMag * dtScale;
+      var kJitter = 0.0034 * jitterMag * dtScale;
       M.Body.applyForce(b, b.position, {
         x: (Math.random()-0.5) * kJitter * b.mass,
         y: (Math.random()-0.5) * kJitter * 0.9 * b.mass
@@ -922,7 +968,7 @@
     });
   }
 
-  var MAX_BALL_SPEED = 24; // world-units/step safety cap — keeps a snappy feel while still stopping tunneling
+  var MAX_BALL_SPEED = 32; // world-units/step safety cap — keeps a snappy feel while still stopping tunneling
   function capBallMotion(){
     var M = Matter;
     ballBodies.forEach(function(b){
@@ -1061,11 +1107,14 @@
       if (!belowSinceAt) belowSinceAt = now;
     }
     // live readout so it's obvious on-screen whether real sensor data is flowing,
-    // instead of having to guess
+    // instead of having to guess — includes the ACTUAL gravity vector being fed
+    // into the physics engine (not just the raw sensor reading), so "is it really
+    // applying real weight right now" is a directly visible number, not a guess
     if (sensorActive && now - lastDebugPaint > 120){
       lastDebugPaint = now;
+      var gTxt = engine ? (engine.gravity.x.toFixed(2) + ", " + engine.gravity.y.toFixed(2)) : "-";
       sensorNote.textContent = "자이로: 연결됨 · 이벤트 " + motionEventCount +
-        "개 · 편차 " + mag.toFixed(1) + " · g(" + smGx.toFixed(1) + ", " + smGy.toFixed(1) + ", " + smGz.toFixed(1) + ")";
+        "개 · 편차 " + mag.toFixed(1) + " · g(" + smGx.toFixed(1) + ", " + smGy.toFixed(1) + ", " + smGz.toFixed(1) + ") · 적용중력(" + gTxt + ")";
     }
   }
 
@@ -1095,6 +1144,27 @@
     updateDepth(dt/16.67);
     balls = composeBalls();
 
+    // Once the round is done, smoothly snap every ball from wherever it
+    // physically settled into its numbered pocket at the bottom of the box —
+    // see the comment above pocketXFor() for why this is a render-layer reveal
+    // rather than literal tiny physical holes. This overrides `balls` (which
+    // broadcastTick() below reads), so viewers see the exact same snap.
+    if (phase === "done" && pocketPositions){
+      var snapT = clamp((performance.now() - resultSnapStartAt) / RESULT_SNAP_MS, 0, 1);
+      var ease = 1 - Math.pow(1 - snapT, 3); // ease-out cubic
+      balls = balls.map(function(b, i){
+        var from = (resultSnapFrom && resultSnapFrom[i]) || { x: b.x, y: b.y };
+        var to = pocketPositions[i];
+        if (!to) return b;
+        return {
+          x: from.x + (to.x - from.x) * ease,
+          y: from.y + (to.y - from.y) * ease,
+          a: b.a, r: b.r, color: b.color, textColor: b.textColor, label: b.label,
+          z: b.z * (1 - ease) // settle flat against the front glass as it snaps into its pocket
+        };
+      });
+    }
+
     if (phase === "settling"){
       var maxSpeed = 0;
       ballBodies.forEach(function(b){ maxSpeed = Math.max(maxSpeed, b.speed); });
@@ -1123,10 +1193,22 @@
   var settleStartedAt = 0, tickAccum = 0;
 
   function finishRound(){
-    var ranked = ballBodies.slice().sort(function(a,b){
-      if (Math.abs(a.position.x - b.position.x) > 2) return a.position.x - b.position.x;
-      return a.position.y - b.position.y;
-    }).map(function(b){ return b.plugin.name; });
+    // Determine order the same way as before (final left-to-right position,
+    // top-to-bottom as a tiebreaker) — pockets are a visualization of this
+    // order, not a different ranking rule.
+    var order = ballBodies.map(function(b, i){ return { i:i, x:b.position.x, y:b.position.y }; })
+      .sort(function(a,b){
+        if (Math.abs(a.x - b.x) > 2) return a.x - b.x;
+        return a.y - b.y;
+      });
+    var ranked = order.map(function(o){ return ballBodies[o.i].plugin.name; });
+    var n = roster.length;
+    pocketPositions = new Array(ballBodies.length);
+    order.forEach(function(o, rankIdx){
+      pocketPositions[o.i] = { x: pocketXFor(rankIdx, n), y: WORLD_H * POCKET_Y_FRAC };
+    });
+    resultSnapFrom = balls.map(function(b){ return { x:b.x, y:b.y }; });
+    resultSnapStartAt = performance.now();
     lastRanking = ranked;
     setPhase("done");
     showResult(ranked, true);
@@ -1140,6 +1222,7 @@
       M.Body.setVelocity(b, { x:(Math.random()-0.5)*10, y:(Math.random()-0.5)*10 - 4 });
     });
     lastRanking = null;
+    pocketPositions = null; resultSnapFrom = null;
     resultActions.classList.add("hidden");
     setPhase("shaking");
     registerIntensity(SHAKE_ON + 3);
@@ -1149,6 +1232,7 @@
     roundId = Date.now();
     buildWorld();
     lastRanking = null;
+    pocketPositions = null; resultSnapFrom = null;
     resultActions.classList.add("hidden");
     setPhase("ready");
     broadcastEvent("init", { roster: roster, roundId: roundId });
@@ -1220,6 +1304,7 @@
     ctx.scale(scale, scale);
 
     drawBoxWireframe();
+    drawPockets();
 
     // draw far (larger z) balls first so nearer ones correctly occlude them —
     // this, plus the size/position shift, is what actually reads as depth
