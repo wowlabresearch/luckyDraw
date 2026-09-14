@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>lucky draw</title>
+<title>LUCKY DRAW</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap">
 <style>
   :root{
@@ -246,7 +246,7 @@
   <div class="top">
     <div class="brand">
       <span class="eyebrow">SHAKE &amp; DRAW</span>
-      <h1>럭키 드럼</h1>
+      <h1>LUCKY DRAW</h1>
     </div>
     <div class="status-strip">
       <span class="pill"><i class="dot" id="dotController"></i>컨트롤러 <span id="cntController">0</span></span>
@@ -790,8 +790,11 @@
       var x = 30 + r + col * (r*2 + 8) + (Math.random()*6-3);
       var y = 30 + r + row * (r*2 + 8);
       var body = M.Bodies.circle(x, y, r, {
-        // low restitution + higher friction = a thud-and-tumble weight, not a bouncy-ball feel
-        restitution: 0.22, friction: 0.25, frictionAir: 0.015, density: 0.0028
+        // livelier than the first pass: lower air/surface friction so balls keep
+        // moving instead of bleeding off speed immediately, higher restitution so
+        // they actually bounce off each other and the walls, lower density so the
+        // same force produces a snappier (lighter-feeling) response
+        restitution: 0.38, friction: 0.12, frictionAir: 0.007, density: 0.0015
       });
       body.plugin = { name: name, color: colorFor(i), textColor: textColorFor(i), label: labelFor(name) };
       return body;
@@ -846,22 +849,31 @@
   function updateGravityFromSensor(){
     if (!engine) return;
     if (sensorActive){
-      engine.gravity.x = clamp(-smGx / GDIV, -6, 6);
-      engine.gravity.y = clamp(smGy / GDIV, -6, 6);
+      engine.gravity.x = clamp(-smGx / GDIV, -9, 9);
+      engine.gravity.y = clamp(smGy / GDIV, -9, 9);
     } else {
       engine.gravity.x = 0;
       engine.gravity.y = 1; // plain default gravity until/unless we ever get real sensor data
     }
   }
 
-  // Fallback ONLY for when there is no real sensor at all (denied/unsupported) —
-  // undirected jitter while the button is held, layered on top of the plain
-  // default gravity above. Never runs alongside real sensor data.
-  function applyFallbackJitter(dtScale){
+  // A single shared gravity vector (above) can only ever translate every ball
+  // together, in lockstep, like one solid block — because every body feels
+  // *exactly* the same force at the same instant. Real shaking is chaotic:
+  // countless per-object wall/ball micro-collisions happen at slightly
+  // different times and angles, which is what actually scatters the balls
+  // instead of letting them drift as one clump. This adds that missing
+  // per-ball randomness — a small independent kick for every single ball,
+  // scaled by how hard the phone is currently being shaken — layered on TOP
+  // of (never instead of) the real gravity direction above. It runs for the
+  // whole "shaking" phase regardless of whether we have a real sensor reading
+  // or are using the press-and-hold fallback, since shakeIntensity already
+  // reflects either source identically.
+  function applyShakeAgitation(dtScale){
     var M = Matter;
     var jitterMag = clamp(shakeIntensity, 0, 26);
     ballBodies.forEach(function(b){
-      var kJitter = 0.0011 * jitterMag * dtScale;
+      var kJitter = 0.0021 * jitterMag * dtScale;
       M.Body.applyForce(b, b.position, {
         x: (Math.random()-0.5) * kJitter * b.mass,
         y: (Math.random()-0.5) * kJitter * 0.9 * b.mass
@@ -869,7 +881,7 @@
     });
   }
 
-  var MAX_BALL_SPEED = 18; // world-units/step safety cap — keeps the "heavy object" feel and stops tunneling
+  var MAX_BALL_SPEED = 24; // world-units/step safety cap — keeps a snappy feel while still stopping tunneling
   function capBallMotion(){
     var M = Matter;
     ballBodies.forEach(function(b){
@@ -1029,7 +1041,7 @@
     updateGravityFromSensor(); // every frame, every phase — the box always follows however the phone is actually oriented/moving right now
 
     if (phase === "shaking"){
-      if (!sensorActive) applyFallbackJitter(dt/16.67); // only when there's truly no sensor data to drive gravity itself
+      applyShakeAgitation(dt/16.67); // per-ball noise on top of the shared gravity direction — see comment above the function
       if (belowSinceAt && performance.now() - belowSinceAt > SHAKE_OFF_HOLD){
         setPhase("settling");
         settleQuietSinceAt = 0;
