@@ -191,6 +191,7 @@
   .deck-controls{display:flex;gap:8px;flex-wrap:wrap;}
   .sensor-note{font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);}
   .debug-wrap{border:2px solid var(--line);background:var(--surface);}
+  .debug-wrap + .debug-wrap{margin-top:12px;}
   .debug-legend{
     display:flex;align-items:center;gap:10px;padding:6px 8px;
     border-bottom:2px solid var(--line);
@@ -198,7 +199,7 @@
   }
   .debug-legend .sw{width:11px;height:11px;display:inline-block;margin-right:4px;border:1px solid var(--ink);vertical-align:-1px;}
   .debug-legend .debug-hint{margin-left:auto;color:var(--ink-soft);font-weight:500;}
-  #debugGraph{display:block;width:100%;height:90px;}
+  #debugGraph,#debugGraphAngle{display:block;width:100%;height:120px;}
   .viewer-note{
     text-align:center;color:var(--ink-soft);font-size:13.5px;
     padding:14px;font-family:var(--font-mono);
@@ -325,8 +326,8 @@
 
       <div class="viewer-note hidden" id="viewerNote">관전 모드</div>
 
-      <!-- shared by both roles: controller draws it from its own live sensor
-           readings, viewer draws the same graph from readings received over
+      <!-- shared by both roles: controller draws these from its own live sensor
+           readings, viewer draws the same graphs from readings received over
            the peer connection (see broadcastTick/onRoomTick) -->
       <div class="debug-wrap">
         <div class="debug-legend">
@@ -334,7 +335,15 @@
           <span><i class="sw" style="background:#1E4FFF"></i>Y</span>
           <span><i class="sw" style="background:#00A66C"></i>Z</span>
         </div>
-        <canvas id="debugGraph" height="90"></canvas>
+        <canvas id="debugGraph" height="120"></canvas>
+      </div>
+      <div class="debug-wrap">
+        <div class="debug-legend">
+          <span><i class="sw" style="background:#7C4DFF"></i>ROLL</span>
+          <span><i class="sw" style="background:#FF7A1E"></i>PITCH</span>
+          <span><i class="sw" style="background:#00AEEF"></i>YAW</span>
+        </div>
+        <canvas id="debugGraphAngle" height="120"></canvas>
       </div>
     </div>
 
@@ -407,6 +416,8 @@
   var canvas = $("drum"); // WebGL surface — owned by the Three.js renderer (see ensureScene3D), no 2d context here
   var debugCanvas = $("debugGraph");
   var debugCtx = debugCanvas.getContext("2d");
+  var angleCanvas = $("debugGraphAngle");
+  var angleCtx = angleCanvas.getContext("2d");
 
   var PHASE_LABEL = {idle:"대기중", ready:"준비됨 · 흔들어보세요", shaking:"흔드는 중", settling:"멈추는 중", done:"완료"};
 
@@ -525,7 +536,10 @@
     // own debug graph plots — sent along so every viewer's copy of that graph
     // shows the live IMU signal too, not just the ball positions.
     var gPayload = [Math.round(smGx*100)/100, Math.round(smGy*100)/100, Math.round(smGz*100)/100];
-    broadcastToViewers({ kind:"tick", roundId: roundId, phase: phase, b: payload, g: gPayload });
+    // a: the same smoothed roll/pitch/yaw (deviceorientation) reading the
+    // controller's own angle graph plots — piggybacked the same way g is.
+    var aPayload = [Math.round(smRoll*100)/100, Math.round(smPitch*100)/100, Math.round(smYaw*100)/100];
+    broadcastToViewers({ kind:"tick", roundId: roundId, phase: phase, b: payload, g: gPayload, a: aPayload });
   }
   function broadcastEvent(type, data){
     data = data || {};
@@ -581,8 +595,33 @@
       }
       lastViewerG = g;
     }
+    // Same interpolation treatment for roll/pitch/yaw. Yaw specifically can
+    // wrap across the -180/180 boundary between two ticks (e.g. 179 -> -179
+    // is really just a 2-degree turn) — interpolating that difference
+    // directly would swing the graph the long way around, so the yaw delta
+    // is wrapped into [-180,180] before interpolating.
+    if (Array.isArray(msg.a)){
+      var a = msg.a;
+      if (lastViewerA){
+        var ASTEPS = 5;
+        var yawDelta = a[2] - lastViewerA[2];
+        yawDelta = ((yawDelta + 180) % 360 + 360) % 360 - 180;
+        for (var as = 1; as <= ASTEPS; as++){
+          var at = as/ASTEPS;
+          pushAngleSample(
+            lastViewerA[0] + (a[0]-lastViewerA[0])*at,
+            lastViewerA[1] + (a[1]-lastViewerA[1])*at,
+            lastViewerA[2] + yawDelta*at
+          );
+        }
+      } else {
+        pushAngleSample(a[0]||0, a[1]||0, a[2]||0);
+      }
+      lastViewerA = a;
+    }
   }
   var lastViewerG = null;
+  var lastViewerA = null;
 
   function onRoomEvent(msg){
     if (!msg) return;
@@ -772,49 +811,82 @@
         camera3D.updateProjectionMatrix();
       }
     }
+    var GRAPH_H = 120;
     var drect = debugCanvas.getBoundingClientRect();
     if (drect.width){
       debugCanvas.width = Math.round(drect.width * dpr);
-      debugCanvas.height = Math.round(90 * dpr);
+      debugCanvas.height = Math.round(GRAPH_H * dpr);
+    }
+    var arect = angleCanvas.getBoundingClientRect();
+    if (arect.width){
+      angleCanvas.width = Math.round(arect.width * dpr);
+      angleCanvas.height = Math.round(GRAPH_H * dpr);
     }
   }
   window.addEventListener("resize", resizeCanvas);
 
-  function drawDebugGraph(){
-    var w = debugCanvas.width, h = debugCanvas.height;
+  // Shared by both live strips (raw accel X/Y/Z and roll/pitch/yaw angle) —
+  // same drawing logic, different canvas/buffer/range/colors.
+  //
+  // Renders each series as a smooth curve rather than straight lineTo()
+  // segments corner-to-corner between points: a viewer's line was still
+  // reading as jagged even after the earlier interpolation fix, because
+  // subdividing a straight segment with more collinear points doesn't curve
+  // it — only the segment's actual shape does. A quadratic through each
+  // pair's midpoint rounds every corner into a curve, which is what the
+  // phone's own graph effectively looks like once you have enough
+  // close-together points that each straight segment's angle is tiny.
+  function drawGraphStrip(cv, cx, series, range, lastSampleAt){
+    var w = cv.width, h = cv.height;
     if (!w || !h) return;
-    debugCtx.clearRect(0,0,w,h);
-    debugCtx.fillStyle = "#FFFFFF";
-    debugCtx.fillRect(0,0,w,h);
-    var range = 40; // m/s^2 shown top-to-bottom — widened so peaks don't clip/look needle-thin
+    cx.clearRect(0,0,w,h);
+    cx.fillStyle = "#FFFFFF";
+    cx.fillRect(0,0,w,h);
     var midY = h/2;
-    // zero line
-    debugCtx.strokeStyle = "rgba(21,22,26,.25)";
-    debugCtx.lineWidth = 1;
-    debugCtx.beginPath(); debugCtx.moveTo(0, midY); debugCtx.lineTo(w, midY); debugCtx.stroke();
-    function traceLine(arr, color){
+    cx.strokeStyle = "rgba(21,22,26,.25)";
+    cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(0, midY); cx.lineTo(w, midY); cx.stroke();
+    var lineScale = (role === "controller") ? 1 : 0.8; // observer line drawn thinner on request
+    series.forEach(function(s){
+      var arr = s.arr;
       if (arr.length < 2) return;
-      debugCtx.strokeStyle = color;
-      debugCtx.lineWidth = Math.max(1.5, w/DEBUG_BUF_LEN*0.9);
-      debugCtx.beginPath();
-      for (var i=0;i<arr.length;i++){
-        var x = (i/(DEBUG_BUF_LEN-1)) * w;
-        var y = midY - (arr[i]/range) * midY;
-        if (i===0) debugCtx.moveTo(x,y); else debugCtx.lineTo(x,y);
+      cx.strokeStyle = s.color;
+      cx.lineWidth = Math.max(1.2, w/DEBUG_BUF_LEN*0.9) * lineScale;
+      cx.lineJoin = "round";
+      cx.lineCap = "round";
+      var pts = arr.map(function(v,i){ return { x:(i/(DEBUG_BUF_LEN-1))*w, y: midY - (v/range)*midY }; });
+      cx.beginPath();
+      cx.moveTo(pts[0].x, pts[0].y);
+      for (var i=1;i<pts.length-1;i++){
+        var mx = (pts[i].x+pts[i+1].x)/2, my = (pts[i].y+pts[i+1].y)/2;
+        cx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
       }
-      debugCtx.stroke();
-    }
-    traceLine(debugBuf.ax, "#FF3B2F");
-    traceLine(debugBuf.ay, "#1E4FFF");
-    traceLine(debugBuf.az, "#00A66C");
+      var last = pts[pts.length-1];
+      cx.lineTo(last.x, last.y);
+      cx.stroke();
+    });
     // stale indicator: if no fresh sample recently — real sensor events on the
     // controller, or ticks received over the peer connection on a viewer —
     // say so right on the graph, for either role.
-    if (lastGraphSampleAt && performance.now() - lastGraphSampleAt > 500){
-      debugCtx.fillStyle = "#FF3B2F";
-      debugCtx.font = "700 " + Math.max(10, h*0.16) + "px 'JetBrains Mono', monospace";
-      debugCtx.fillText("신호 끊김", 6, 14);
+    if (lastSampleAt && performance.now() - lastSampleAt > 500){
+      cx.fillStyle = "#FF3B2F";
+      cx.font = "700 " + Math.max(10, h*0.13) + "px 'JetBrains Mono', monospace";
+      cx.fillText("신호 끊김", 6, 14);
     }
+  }
+  function drawDebugGraph(){
+    drawGraphStrip(debugCanvas, debugCtx, [
+      { arr: debugBuf.ax, color: "#FF3B2F" },
+      { arr: debugBuf.ay, color: "#1E4FFF" },
+      { arr: debugBuf.az, color: "#00A66C" }
+    ], 40, lastGraphSampleAt);
+  }
+  function drawAngleGraph(){
+    drawGraphStrip(angleCanvas, angleCtx, [
+      { arr: angleBuf.roll, color: "#7C4DFF" },
+      { arr: angleBuf.pitch, color: "#FF7A1E" },
+      { arr: angleBuf.yaw, color: "#00AEEF" }
+    ], 180, lastAngleSampleAt);
   }
 
   /* ============================= three.js scene (both roles) ============================= */
@@ -1169,6 +1241,13 @@
       usingFallback = true;
       sensorNote.textContent = "자이로 센서 없음 · 버튼을 누르고 있는 동안 흔들기를 시뮬레이션합니다";
     }
+    // deviceorientation (roll/pitch/yaw) is a separate permission-gated API from
+    // devicemotion above; on browsers that don't gate it, attach it directly —
+    // the gated (iOS) case is handled in ensureMotionPermission alongside the
+    // devicemotion permission request, same click gesture.
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission !== "function"){
+      window.addEventListener("deviceorientation", onDeviceOrientation);
+    }
   }
 
   // IMPORTANT: this must be called synchronously, directly inside a real "click"
@@ -1182,6 +1261,14 @@
   // are not the same as the user actually choosing "Don't Allow").
   var motionGranted = false;
   function ensureMotionPermission(){
+    // Both permission requests must fire synchronously inside this same real
+    // click handler (see the note above) — neither can wait on the other's
+    // promise first, so they're kicked off independently here.
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function"){
+      DeviceOrientationEvent.requestPermission().then(function(res){
+        if (res === "granted") window.addEventListener("deviceorientation", onDeviceOrientation);
+      }).catch(function(){ /* roll/pitch/yaw graph just stays empty — not fatal */ });
+    }
     if (motionGranted) return;
     if (typeof DeviceMotionEvent === "undefined" || typeof DeviceMotionEvent.requestPermission !== "function") return;
     DeviceMotionEvent.requestPermission().then(function(res){
@@ -1229,6 +1316,18 @@
     }
     lastGraphSampleAt = performance.now();
   }
+  // Second live strip: device ORIENTATION (roll/pitch/yaw angles), a separate
+  // browser API (deviceorientation) from the accelerometer (devicemotion)
+  // plotted above — same ring-buffer/graph machinery, different source event.
+  var angleBuf = { roll: [], pitch: [], yaw: [] };
+  var lastAngleSampleAt = 0;
+  function pushAngleSample(roll, pitch, yaw){
+    angleBuf.roll.push(roll); angleBuf.pitch.push(pitch); angleBuf.yaw.push(yaw);
+    if (angleBuf.roll.length > DEBUG_BUF_LEN){
+      angleBuf.roll.shift(); angleBuf.pitch.shift(); angleBuf.yaw.shift();
+    }
+    lastAngleSampleAt = performance.now();
+  }
   function onDeviceMotion(e){
     var g = e.accelerationIncludingGravity;
     if (!g || typeof g.x !== "number") return; // some browsers fire an event with no data at all — ignore those, don't count them as "active"
@@ -1251,6 +1350,31 @@
     jGx = smGx - blGx; jGy = smGy - blGy; jGz = smGz - blGz;
     var totalMag = Math.sqrt(gx*gx + gy*gy + gz*gz);
     registerIntensity(Math.abs(totalMag - GDIV)); // how far this reading departs from "just sitting there at 1g"
+  }
+
+  // ROLL/PITCH/YAW from the separate deviceorientation API. beta (front-back
+  // tilt, -180..180) maps to pitch, gamma (left-right tilt, -90..90) maps to
+  // roll, alpha (compass heading, 0..360) maps to yaw. alpha wraps around at
+  // 360/0, so smoothing it with a plain exponential average would produce a
+  // huge spurious jump every time it crosses that boundary (e.g. 359 -> 1
+  // would average toward 180, not toward 0) — averaging its sin/cos unit
+  // vector instead and reading the angle back out with atan2 sidesteps that.
+  var smYawX = 1, smYawY = 0; // unit vector for yaw smoothing (wraparound-safe)
+  var smRoll = 0, smPitch = 0, smYaw = 0;
+  var orientationActive = false;
+  function onDeviceOrientation(e){
+    if (e.beta === null || e.gamma === null) return; // some browsers fire an empty event — ignore, don't count as active
+    orientationActive = true;
+    var roll = e.gamma || 0;
+    var pitch = e.beta || 0;
+    var alpha = e.alpha || 0;
+    var rad = alpha * Math.PI / 180;
+    smYawX = smYawX*0.7 + Math.cos(rad)*0.3;
+    smYawY = smYawY*0.7 + Math.sin(rad)*0.3;
+    smYaw = Math.atan2(smYawY, smYawX) * 180 / Math.PI;
+    smRoll = smRoll*0.6 + roll*0.4;
+    smPitch = smPitch*0.6 + pitch*0.4;
+    pushAngleSample(smRoll, smPitch, smYaw);
   }
 
   // Press-and-hold fallback / manual override — only takes over when there is no
@@ -1349,6 +1473,7 @@
 
     render3D();
     drawDebugGraph();
+    drawAngleGraph();
 
     tickAccum += dt;
     if (tickAccum > TICK_MS && (phase==="shaking" || phase==="settling" || phase==="ready" || phase==="done")){
@@ -1407,6 +1532,7 @@
     }
     render3D();
     drawDebugGraph();
+    drawAngleGraph();
   }
 
   /* ============================= phase / result UI ============================= */
