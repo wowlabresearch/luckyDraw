@@ -380,7 +380,7 @@
   var TICK_MS = 70;          // broadcast interval to viewers while a round is live
   var SHAKE_ON = 7;          // m/s^2 deviation to count as "shaking"
   var SHAKE_OFF_HOLD = 650;  // ms below threshold before we call it "stopped"
-  var SETTLE_SPEED = 0.09;   // cannon body.velocity length (units/s) considered "at rest"
+  var SETTLE_SPEED = 0.15;   // cannon body.velocity length (units/s) considered "at rest"
   var SETTLE_HOLD = 550;     // ms all bodies must stay under SETTLE_SPEED
   var SETTLE_TIMEOUT = 7000; // hard cap so a round can't hang forever
   var PEER_ID_PREFIX = "luckydrum7f3-"; // namespaces our ids on the public PeerJS broker
@@ -949,14 +949,18 @@
     world = new CANNON.World();
     world.gravity.set(0, -BASE_GRAVITY, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
-    world.solver.iterations = 12;
+    world.solver.iterations = 16; // higher than default — needed for the stiff, billiard-ball-hard contacts below to stay stable
 
     var wallMat = new CANNON.Material("wall");
     var ballMat = new CANNON.Material("ball");
-    world.addContactMaterial(new CANNON.ContactMaterial(wallMat, ballMat, { friction: 0.02, restitution: 0.75 }));
-    // "elastic soccer ball" pass: high restitution + low friction so balls visibly
-    // rebound off each other instead of thudding once and stopping dead.
-    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, ballMat, { friction: 0.015, restitution: 0.82 }));
+    // BILLIARD BALL pass: high stiffness + low relaxation makes contacts resolve
+    // in a sharp, hard "click" instead of a soft, springy squish — that crispness
+    // reads as weight and solidity far more than restitution alone does. High
+    // restitution + low friction on top means a hit ball snaps away immediately
+    // and keeps most of its speed, instead of dying into the pile it hit.
+    var HARD_CONTACT = { contactEquationStiffness: 5e7, contactEquationRelaxation: 2 };
+    world.addContactMaterial(new CANNON.ContactMaterial(wallMat, ballMat, Object.assign({ friction: 0.05, restitution: 0.82 }, HARD_CONTACT)));
+    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, ballMat, Object.assign({ friction: 0.02, restitution: 0.90 }, HARD_CONTACT)));
 
     var hw = BOX_W/2, hd = BOX_D/2;
     function addWall(px, py, pz, axis, angle){
@@ -988,8 +992,12 @@
       // Heavier bodies hit each other with more momentum, which is what actually
       // reads as "weight" in a pile of balls being thrown around (gravity itself
       // is mass-independent, so this has to come from the bodies themselves).
-      var mass = Math.max(0.4, 1.4 * (4/3) * Math.PI * r*r*r);
-      var body = new CANNON.Body({ mass: mass, shape: new CANNON.Sphere(r), material: ballMat, linearDamping: 0.05, angularDamping: 0.2, allowSleep: false });
+      // BALL_DENSITY is tuned high, like a solid resin billiard ball, not a hollow
+      // plastic one — and linearDamping is kept very low so once a ball is moving
+      // it keeps moving, instead of visibly dragging to a stop mid-air.
+      var BALL_DENSITY = 3.2;
+      var mass = Math.max(0.5, BALL_DENSITY * (4/3) * Math.PI * r*r*r);
+      var body = new CANNON.Body({ mass: mass, shape: new CANNON.Sphere(r), material: ballMat, linearDamping: 0.015, angularDamping: 0.15, allowSleep: false });
       body.position.set(x, y, z);
       body.appData = { name: name, label: labelFor(name) };
       world.addBody(body);
@@ -1009,25 +1017,29 @@
 
   // AXIS_SIGN maps each raw device-motion axis onto this 3D world 1:1 (device
   // x=left/right, y=up/down-along-the-phone, z=out-of-the-screen-toward-you —
-  // exactly world X/Y/Z here), with a per-axis +1/-1 correction. X and Y were
+  // exactly world X/Y/Z here), with a per-axis +1/-1 correction. Y was
   // empirically confirmed correct in the earlier 2D version (holding the phone
-  // upright normally must pull balls down, not up — real-device-tested). Z is
-  // new (the old build only used it for a fake depth-spring, never as a real
-  // gravity/kick axis), so its sign is a best guess; the on-screen flip buttons
-  // (flipXBtn/flipYBtn/flipZBtn) let anyone correct any axis in one tap if a
-  // specific device/browser disagrees, instead of needing another round-trip.
-  var AXIS_SIGN = { x: -1, y: 1, z: -1 };
+  // upright normally must pull balls down, not up — real-device-tested). X and
+  // Z were both reported backwards on real-device retest of the 3D rewrite, so
+  // both are now flipped from their original guess. The on-screen flip buttons
+  // (flipXBtn/flipYBtn/flipZBtn) still let anyone correct any axis in one tap
+  // if a specific device/browser disagrees, instead of needing another round-trip.
+  var AXIS_SIGN = { x: 1, y: 1, z: 1 };
   (function loadAxisSign(){
     try {
-      var saved = JSON.parse(localStorage.getItem("luckydrum_axis_sign") || "null");
+      // _v2 — the default signs changed (X and Z flipped) after real-device
+      // testing, so a stale v1 value saved by tapping a flip button under the
+      // old defaults must NOT be reapplied — it would silently re-invert an
+      // axis that's now correct out of the box.
+      var saved = JSON.parse(localStorage.getItem("luckydrum_axis_sign_v2") || "null");
       if (saved && typeof saved.x === "number" && typeof saved.y === "number" && typeof saved.z === "number") AXIS_SIGN = saved;
     } catch(e){}
   })();
-  function saveAxisSign(){ try { localStorage.setItem("luckydrum_axis_sign", JSON.stringify(AXIS_SIGN)); } catch(e){} }
+  function saveAxisSign(){ try { localStorage.setItem("luckydrum_axis_sign_v2", JSON.stringify(AXIS_SIGN)); } catch(e){} }
   function refreshFlipButtons(){
-    flipXBtn.classList.toggle("flip-on", AXIS_SIGN.x > 0);
+    flipXBtn.classList.toggle("flip-on", AXIS_SIGN.x < 0);
     flipYBtn.classList.toggle("flip-on", AXIS_SIGN.y < 0);
-    flipZBtn.classList.toggle("flip-on", AXIS_SIGN.z > 0);
+    flipZBtn.classList.toggle("flip-on", AXIS_SIGN.z < 0);
   }
   flipXBtn.addEventListener("click", function(){ AXIS_SIGN.x *= -1; saveAxisSign(); refreshFlipButtons(); });
   flipYBtn.addEventListener("click", function(){ AXIS_SIGN.y *= -1; saveAxisSign(); refreshFlipButtons(); });
@@ -1040,7 +1052,7 @@
   // you deliberately reorient the phone, and barely moves during a fast shake —
   // so gravity stays stable and correct while shaking, and only actually
   // changes when you mean it to (tilt it, flip it over, tip it forward/back).
-  var BASE_GRAVITY = 16; // world-units/s^2 — tuned for the ~10-unit box, real obvious weight
+  var BASE_GRAVITY = 30; // world-units/s^2 — pushed well past the first pass: a fast, obvious fall reads as "heavy", a slow drift reads as "floaty"
   function updateGravityFromSensor(){
     if (!world) return;
     if (sensorActive){
@@ -1067,7 +1079,10 @@
   // instead of moving as one rigid block.
   function applyShakeAgitation(dtScale){
     var mag = clamp(shakeIntensity, 0, 26);
-    var kick = mag * 0.11 * dtScale;
+    // Snappy on purpose: a hard shake should slam balls to top speed in 2-3
+    // frames, not ramp up over half a second — that immediacy is a big part
+    // of "weight" (a heavy object hit hard moves NOW, it doesn't ease in).
+    var kick = mag * 0.42 * dtScale;
     var jx = AXIS_SIGN.x*jGx, jy = AXIS_SIGN.y*jGy, jz = AXIS_SIGN.z*jGz;
     var bmag = Math.sqrt(jx*jx + jy*jy + jz*jz);
     var haveDirection = sensorActive && bmag > 0.35;
@@ -1083,7 +1098,7 @@
     });
   }
 
-  var MAX_BALL_SPEED = 32; // units/s safety cap — keeps a snappy feel while still stopping tunneling
+  var MAX_BALL_SPEED = 46; // units/s safety cap — raised so a hard shake isn't artificially ceilinged before it feels forceful
   function capBallMotion(){
     var hw = BOX_W/2, hd = BOX_D/2, margin = 0.05;
     ballBodies.forEach(function(b){
@@ -1264,7 +1279,7 @@
       }
     }
 
-    world.step(1/60, Math.min(0.034, dt/1000), 6);
+    world.step(1/60, Math.min(0.034, dt/1000), 8); // more substeps — needed for the stiffer billiard-ball contacts and higher top speed to stay stable
     capBallMotion();
     balls = composeBalls();
 
@@ -1311,7 +1326,7 @@
   reshuffleBtn.addEventListener("click", function(){
     if (!world) return;
     ballBodies.forEach(function(b){
-      b.velocity.set((Math.random()-0.5)*9, Math.random()*6+2, (Math.random()-0.5)*9);
+      b.velocity.set((Math.random()-0.5)*16, Math.random()*10+4, (Math.random()-0.5)*16);
     });
     lastRanking = null;
     resultActions.classList.add("hidden");
