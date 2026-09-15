@@ -259,34 +259,34 @@
 
   <!-- SETUP -->
   <section class="card setup" id="setupCard">
-    <h2>명단을 넣고 흔들 준비를 하세요</h2>
+    <h2>TYPE PARTICIPANTS' NAME</h2>
 
     <div class="role-grid">
       <button class="role-btn" id="pickController" type="button">
         <div class="r-icon">📱</div>
-        <div class="r-title">흔들기 담당</div>
+        <div class="r-title">SHAKER</div>
       </button>
       <button class="role-btn" id="pickViewer" type="button">
         <div class="r-icon">🖥️</div>
-        <div class="r-title">관전만 하기</div>
+        <div class="r-title">OBSERVER</div>
       </button>
     </div>
 
     <div id="controllerSetupFields">
-      <label class="field-label" for="rosterInput">참가자 명단</label>
+      <label class="field-label" for="rosterInput">PARTICIPANTS LIST</label>
       <textarea id="rosterInput" placeholder="예시)&#10;김민준&#10;이서연&#10;박도윤&#10;최하은&#10;..."></textarea>
       <div class="setup-foot">
-        <span class="count-readout">인식된 인원: <b id="rosterCount">0</b>명</span>
-        <button class="btn btn-primary" id="startBtn" disabled>저장하고 시작</button>
+        <span class="count-readout">Number of Participants: <b id="rosterCount">0</b> </span>
+        <button class="btn btn-primary" id="startBtn" disabled>SAVE & START</button>
       </div>
     </div>
 
     <div id="viewerSetupFields" class="hidden">
-      <label class="field-label" for="viewerCodeInput">흔들기 담당 기기의 연결 코드</label>
+      <label class="field-label" for="viewerCodeInput">SHAKER'S CODE</label>
       <input id="viewerCodeInput" type="text" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="예: 7F3KQ">
       <div class="setup-foot">
-        <span class="count-readout" id="viewerConnectStatus">폰 화면에 뜬 5자리 코드를 입력하세요</span>
-        <button class="btn btn-primary" id="viewerConnectBtn" type="button">연결하기</button>
+        <span class="count-readout" id="viewerConnectStatus">TYPE 5 LETTERS APPEARED ON YOUR PHONE</span>
+        <button class="btn btn-primary" id="viewerConnectBtn" type="button">CONNECT</button>
       </div>
     </div>
   </section>
@@ -303,9 +303,9 @@
 
       <div class="deck" id="controllerDeck">
         <div class="peer-code-row">
-          <span>연결 코드</span>
+          <span>CODE</span>
           <span class="code-big" id="peerCodeText">생성 중…</span>
-          <button class="btn btn-ghost" id="copyCodeBtn" type="button">코드 복사</button>
+          <button class="btn btn-ghost" id="copyCodeBtn" type="button">copy CODE</button>
         </div>
         <div class="shake-row">
           <button id="shakeBtn">탭해서 자이로 켜기</button>
@@ -324,7 +324,7 @@
         </div>
       </div>
 
-      <div class="viewer-note hidden" id="viewerNote">관전 모드</div>
+      <div class="viewer-note hidden" id="viewerNote">OBSERVER MODE</div>
 
       <!-- shared by both roles: controller draws these from its own live sensor
            readings, viewer draws the same graphs from readings received over
