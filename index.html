@@ -258,16 +258,16 @@
 
   <!-- SETUP -->
   <section class="card setup" id="setupCard">
-    <h2>Type the list</h2>
+    <h2>명단을 넣고 흔들 준비를 하세요</h2>
 
     <div class="role-grid">
       <button class="role-btn" id="pickController" type="button">
         <div class="r-icon">📱</div>
-        <div class="r-title">Shaker</div>
+        <div class="r-title">흔들기 담당</div>
       </button>
       <button class="role-btn" id="pickViewer" type="button">
         <div class="r-icon">🖥️</div>
-        <div class="r-title">Observer</div>
+        <div class="r-title">관전만 하기</div>
       </button>
     </div>
 
@@ -281,7 +281,7 @@
     </div>
 
     <div id="viewerSetupFields" class="hidden">
-      <label class="field-label" for="viewerCodeInput">Shaker 기기의 연결 코드</label>
+      <label class="field-label" for="viewerCodeInput">흔들기 담당 기기의 연결 코드</label>
       <input id="viewerCodeInput" type="text" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="예: 7F3KQ">
       <div class="setup-foot">
         <span class="count-readout" id="viewerConnectStatus">폰 화면에 뜬 5자리 코드를 입력하세요</span>
@@ -321,17 +321,21 @@
           <button class="btn btn-ghost" id="flipYBtn" type="button">Y 반전</button>
           <button class="btn btn-ghost" id="flipZBtn" type="button">Z 반전</button>
         </div>
-        <div class="debug-wrap">
-          <div class="debug-legend">
-            <span><i class="sw" style="background:#FF3B2F"></i>X</span>
-            <span><i class="sw" style="background:#1E4FFF"></i>Y</span>
-            <span><i class="sw" style="background:#00A66C"></i>Z</span>
-          </div>
-          <canvas id="debugGraph" height="90"></canvas>
-        </div>
       </div>
 
       <div class="viewer-note hidden" id="viewerNote">관전 모드</div>
+
+      <!-- shared by both roles: controller draws it from its own live sensor
+           readings, viewer draws the same graph from readings received over
+           the peer connection (see broadcastTick/onRoomTick) -->
+      <div class="debug-wrap">
+        <div class="debug-legend">
+          <span><i class="sw" style="background:#FF3B2F"></i>X</span>
+          <span><i class="sw" style="background:#1E4FFF"></i>Y</span>
+          <span><i class="sw" style="background:#00A66C"></i>Z</span>
+        </div>
+        <canvas id="debugGraph" height="90"></canvas>
+      </div>
     </div>
 
     <aside class="sidebar">
@@ -517,7 +521,11 @@
     // sphere, so host and viewer stay pixel-identical without needing quaternion
     // data on the wire.
     var payload = balls.map(function(b){ return [Math.round(b.x*100)/100, Math.round(b.y*100)/100, Math.round(b.z*100)/100]; });
-    broadcastToViewers({ kind:"tick", roundId: roundId, phase: phase, b: payload });
+    // g: the same fast-smoothed accelerometer reading (smGx/y/z) the controller's
+    // own debug graph plots — sent along so every viewer's copy of that graph
+    // shows the live IMU signal too, not just the ball positions.
+    var gPayload = [Math.round(smGx*100)/100, Math.round(smGy*100)/100, Math.round(smGz*100)/100];
+    broadcastToViewers({ kind:"tick", roundId: roundId, phase: phase, b: payload, g: gPayload });
   }
   function broadcastEvent(type, data){
     data = data || {};
@@ -547,6 +555,9 @@
     prevSnap = curSnap;
     curSnap = { t: performance.now(), b: msg.b };
     if (msg.phase) setPhase(msg.phase, true);
+    // feeds the SAME debug graph / ring buffer the controller's own onDeviceMotion
+    // feeds — so a viewer's graph is the controller's real IMU signal, not a copy.
+    if (Array.isArray(msg.g)) pushDebugSample(msg.g[0]||0, msg.g[1]||0, msg.g[2]||0);
   }
 
   function onRoomEvent(msg){
@@ -772,8 +783,10 @@
     traceLine(debugBuf.ax, "#FF3B2F");
     traceLine(debugBuf.ay, "#1E4FFF");
     traceLine(debugBuf.az, "#00A66C");
-    // stale indicator: if no real motion event recently, say so right on the graph
-    if (role === "controller" && sensorActive && performance.now() - lastMotionEventAt > 500){
+    // stale indicator: if no fresh sample recently — real sensor events on the
+    // controller, or ticks received over the peer connection on a viewer —
+    // say so right on the graph, for either role.
+    if (lastGraphSampleAt && performance.now() - lastGraphSampleAt > 500){
       debugCtx.fillStyle = "#FF3B2F";
       debugCtx.font = "700 " + Math.max(10, h*0.16) + "px 'JetBrains Mono', monospace";
       debugCtx.fillText("신호 끊김", 6, 14);
@@ -1184,11 +1197,13 @@
   // ring buffer of raw ax/ay/az for the on-screen debug graph
   var DEBUG_BUF_LEN = 160;
   var debugBuf = { ax: [], ay: [], az: [] };
+  var lastGraphSampleAt = 0; // set by either a real onDeviceMotion sample (controller) or a received tick (viewer) — see drawDebugGraph's stale check
   function pushDebugSample(ax, ay, az){
     debugBuf.ax.push(ax); debugBuf.ay.push(ay); debugBuf.az.push(az);
     if (debugBuf.ax.length > DEBUG_BUF_LEN){
       debugBuf.ax.shift(); debugBuf.ay.shift(); debugBuf.az.shift();
     }
+    lastGraphSampleAt = performance.now();
   }
   function onDeviceMotion(e){
     var g = e.accelerationIncludingGravity;
@@ -1243,7 +1258,14 @@
     var now = performance.now();
     if (mag > SHAKE_ON){
       lastAboveOnAt = now;
-      if (phase === "ready" || phase === "done") { setPhase("shaking"); }
+      // "settling" must be able to bounce back to "shaking" — without this, a
+      // single brief lull in a natural shake rhythm (over SHAKE_OFF_HOLD ms)
+      // drops it into "settling", where applyShakeAgitation stops running
+      // entirely: the box then just ignores you and coasts on gravity alone
+      // until it either looks "settled" or the 7s SETTLE_TIMEOUT forces a
+      // ranking — which is exactly the "freezes and locks in a result every
+      // few seconds while I'm still shaking it" symptom.
+      if (phase === "ready" || phase === "done" || phase === "settling") { setPhase("shaking"); }
       belowSinceAt = 0;
     } else if (phase === "shaking") {
       if (!belowSinceAt) belowSinceAt = now;
@@ -1360,6 +1382,7 @@
       });
     }
     render3D();
+    drawDebugGraph();
   }
 
   /* ============================= phase / result UI ============================= */
