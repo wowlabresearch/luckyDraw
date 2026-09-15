@@ -194,9 +194,9 @@
   .debug-legend{
     display:flex;align-items:center;gap:10px;padding:6px 8px;
     border-bottom:2px solid var(--line);
-    font-family:var(--font-mono);font-size:11px;font-weight:700;
+    font-family:var(--font-mono);font-size:14px;font-weight:700;
   }
-  .debug-legend .sw{width:9px;height:9px;display:inline-block;margin-right:4px;border:1px solid var(--ink);vertical-align:-1px;}
+  .debug-legend .sw{width:11px;height:11px;display:inline-block;margin-right:4px;border:1px solid var(--ink);vertical-align:-1px;}
   .debug-legend .debug-hint{margin-left:auto;color:var(--ink-soft);font-weight:500;}
   #debugGraph{display:block;width:100%;height:90px;}
   .viewer-note{
@@ -557,8 +557,32 @@
     if (msg.phase) setPhase(msg.phase, true);
     // feeds the SAME debug graph / ring buffer the controller's own onDeviceMotion
     // feeds — so a viewer's graph is the controller's real IMU signal, not a copy.
-    if (Array.isArray(msg.g)) pushDebugSample(msg.g[0]||0, msg.g[1]||0, msg.g[2]||0);
+    // The controller pushes one point per real sensor event (~60Hz); a viewer
+    // only gets one g reading per network tick (~TICK_MS, ~14Hz), so pushing
+    // just that one point per tick packs far fewer, much bigger jumps into the
+    // same 160-point window — that's what was reading as "spiky" compared to
+    // the phone's own smooth trace. Interpolating a few points between the
+    // last received reading and this one fills that gap with the same values
+    // the real signal was already moving through, so the shape matches.
+    if (Array.isArray(msg.g)){
+      var g = msg.g;
+      if (lastViewerG){
+        var STEPS = 5;
+        for (var s=1; s<=STEPS; s++){
+          var t = s/STEPS;
+          pushDebugSample(
+            lastViewerG[0] + (g[0]-lastViewerG[0])*t,
+            lastViewerG[1] + (g[1]-lastViewerG[1])*t,
+            lastViewerG[2] + (g[2]-lastViewerG[2])*t
+          );
+        }
+      } else {
+        pushDebugSample(g[0]||0, g[1]||0, g[2]||0);
+      }
+      lastViewerG = g;
+    }
   }
+  var lastViewerG = null;
 
   function onRoomEvent(msg){
     if (!msg) return;
@@ -762,7 +786,7 @@
     debugCtx.clearRect(0,0,w,h);
     debugCtx.fillStyle = "#FFFFFF";
     debugCtx.fillRect(0,0,w,h);
-    var range = 24; // m/s^2 shown top-to-bottom
+    var range = 40; // m/s^2 shown top-to-bottom — widened so peaks don't clip/look needle-thin
     var midY = h/2;
     // zero line
     debugCtx.strokeStyle = "rgba(21,22,26,.25)";
