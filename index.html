@@ -319,10 +319,6 @@
           <button class="btn" id="newRoundBtn">새 라운드</button>
           <button class="btn btn-ghost" id="editRosterBtn">명단 변경</button>
         </div>
-        <div class="deck-controls">
-          <button class="btn btn-ghost" id="flipYBtn" type="button">중력 상하 반전</button>
-          <button class="btn btn-ghost" id="flipXBtn" type="button">중력 좌우 반전</button>
-        </div>
         <div class="sensor-note" id="sensorNote">자이로 센서: 확인 중…</div>
         <div class="debug-wrap">
           <div class="debug-legend">
@@ -394,7 +390,6 @@
   var controllerDeck = $("controllerDeck"), viewerNote = $("viewerNote");
   var shakeBtn = $("shakeBtn"), meterFill = $("meterFill"), sensorNote = $("sensorNote");
   var reshuffleBtn = $("reshuffleBtn"), newRoundBtn = $("newRoundBtn"), editRosterBtn = $("editRosterBtn");
-  var flipYBtn = $("flipYBtn"), flipXBtn = $("flipXBtn");
   var fullResetBtn = $("fullResetBtn");
   var phaseReadout = $("phaseReadout"), roleTag = $("roleTag");
   var rosterList = $("rosterList"), rosterPanelCount = $("rosterPanelCount");
@@ -693,15 +688,6 @@
     setupCard.classList.remove("hidden");
   });
 
-  flipYBtn.addEventListener("click", function(){
-    gravFlipY *= -1;
-    flipYBtn.classList.toggle("flip-on", gravFlipY < 0);
-  });
-  flipXBtn.addEventListener("click", function(){
-    gravFlipX *= -1;
-    flipXBtn.classList.toggle("flip-on", gravFlipX < 0);
-  });
-
   copyCodeBtn.addEventListener("click", function(){
     if (!peerCode) return;
     if (navigator.clipboard && navigator.clipboard.writeText){
@@ -788,7 +774,6 @@
     engine = M.Engine.create({ positionIterations: 10, velocityIterations: 8 });
     engine.gravity.y = 1;
     world = engine.world;
-    pocketPositions = null; resultSnapFrom = null;
 
     var t = 60; // wall thickness — extra margin against high-speed tunneling
     wallBodies = [
@@ -806,14 +791,14 @@
       var x = 30 + r + col * (r*2 + 8) + (Math.random()*6-3);
       var y = 30 + r + row * (r*2 + 8);
       var body = M.Bodies.circle(x, y, r, {
-        // "elastic soccer ball" pass: high-ish restitution so they visibly
-        // rebound off each other and the walls instead of just thudding once,
-        // low friction/frictionAir so a bounce doesn't die out immediately,
-        // and a bit more density than before — not for the fall speed (gravity
-        // is mass-independent) but because heavier bodies hit each other with
-        // more momentum, which is what actually reads as "weight" in a pile of
-        // balls being thrown around together
-        restitution: 0.55, friction: 0.06, frictionAir: 0.004, density: 0.0022
+        // "elastic soccer ball" pass, pushed further: high restitution so
+        // they visibly rebound off each other and the walls instead of
+        // thudding once and stopping, very low friction/frictionAir so a
+        // bounce doesn't die out after one hit, and denser bodies — not for
+        // fall speed (gravity is mass-independent in Matter) but because
+        // heavier bodies hit each other with more momentum, which is what
+        // actually reads as "weight" in a pile of balls being thrown around
+        restitution: 0.68, friction: 0.03, frictionAir: 0.002, density: 0.0032
       });
       body.plugin = { name: name, color: colorFor(i), textColor: textColorFor(i), label: labelFor(name) };
       return body;
@@ -857,118 +842,59 @@
 
   var lastRanking = null;
 
-  // ============================= pockets (ranking reveal) =============================
-  // The idea: a row of numbered pockets along the box floor, and whichever
-  // pocket a ball ends up in IS its rank — 1st pocket (left) = 1st place. A
-  // literal version of this (N physical holes, exactly ball-sized, built into
-  // the floor) doesn't hold up once N gets into the 30–50 range: at that size
-  // each pocket would be far narrower than a ball, so balls could never
-  // physically settle into their own separate hole while being thrown around.
-  // Instead, physics runs completely freely during shaking (nothing constrains
-  // where balls can go), and the moment a round finishes, every ball animates
-  // — smoothly, from wherever it actually settled — into its own evenly-spaced
-  // pocket slot, ordered by that same final left-to-right position. The
-  // pockets are drawn on the floor throughout so "there are exactly as many
-  // holes as people" reads clearly before the reveal happens.
-  var POCKET_Y_FRAC = 0.86; // how far down the box the pocket row sits
-  var pocketPositions = null; // set by finishRound(): index -> {x,y} target, aligned with ballBodies
-  var resultSnapFrom = null;  // ball render positions captured at the moment the round finished
-  var resultSnapStartAt = 0;
-  var RESULT_SNAP_MS = 550;
-  function pocketMargin(n){ return radiusFor(n) + 14; }
-  function pocketBoundaryX(i, n){ // i in [0, n] — the divider line before pocket i
-    var margin = pocketMargin(n);
-    return margin + (i / n) * (WORLD_W - margin * 2);
-  }
-  function pocketXFor(rankIdx, n){ // center of pocket rankIdx (0-based, left to right)
-    if (n <= 1) return WORLD_W / 2;
-    var margin = pocketMargin(n);
-    return margin + (rankIdx + 0.5) * ((WORLD_W - margin * 2) / n);
-  }
-  function drawPockets(){
-    var n = roster.length;
-    if (!n) return;
-    var y0 = WORLD_H * POCKET_Y_FRAC - 12, y1 = WORLD_H * POCKET_Y_FRAC + 16;
-    ctx.strokeStyle = "rgba(21,22,26,.28)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (var i = 1; i < n; i++){
-      var x = pocketBoundaryX(i, n);
-      ctx.moveTo(x, y0); ctx.lineTo(x, y1);
-    }
-    ctx.stroke();
-  }
-
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
-  // Manual override — accelerationIncludingGravity's exact sign convention for
-  // "held upright" vs "lying flat" has been unreliable to pin down from docs
-  // alone across every round of this project, and a wrong sign is exactly what
-  // produces "balls float / drift the wrong way." Rather than guess again,
-  // these let you flip it yourself in one tap (see flipYBtn/flipXBtn below)
-  // until "down" visibly matches how you're holding the phone.
-  var gravFlipX = 1, gravFlipY = 1;
-
-  // Runs every frame, in every phase, for as long as a round exists — this is
-  // not a "while shaking" special case.
+  // REDESIGNED after real-device testing kept surfacing sign/axis problems
+  // (balls floating, then balls slamming into the *ceiling* the instant the
+  // gyro turned on). accelerationIncludingGravity's x/y sign convention for
+  // "phone held upright" has proven unreliable to pin down and inconsistent
+  // in practice, and getting it wrong doesn't fail quietly — it visibly
+  // launches every ball at once, in the same wrong direction, which is
+  // also a big part of why balls looked like they were "stuck together": a
+  // uniform force (right or wrong direction) slamming a whole grid of balls
+  // into the same wall at the same instant packs them into a tight cluster
+  // right at that wall, and gravity alone never pushes them apart sideways.
   //
-  // IMPORTANT: this now derives gravity's DIRECTION from the sensor but keeps
-  // a roughly CONSTANT magnitude, instead of using the raw sensor reading's
-  // size directly. The earlier version used gx/GDIV, gy/GDIV as the gravity
-  // components directly — but accelerationIncludingGravity's x/y components
-  // shrink toward 0 in plenty of everyday holding positions (phone lying
-  // close to flat, or held close to a particular tilt angle where gravity is
-  // mostly on the z-axis instead), and near-zero gravity is exactly what
-  // "balls float in place" looks like. Normalizing to a fixed magnitude means
-  // there is always real, obvious weight; only which way is "down" on screen
-  // follows the phone's tilt. A small extra boost while actively shaking adds
-  // punch on top of the independent per-ball jitter in applyShakeAgitation().
+  // So gravity direction is no longer derived from the sensor at all. Down is
+  // always straight down on screen, at a constant, deliberately heavy
+  // magnitude — exactly like every simple 2D physics box, with zero chance of
+  // ever pointing the wrong way. Shake strength (from the sensor, but as pure
+  // magnitude — direction never enters into it) only affects how hard
+  // applyShakeAgitation() below throws the balls around; it doesn't touch
+  // gravity itself.
+  var BASE_GRAVITY = 2.6; // well above Matter's own "1 = normal" default — real, obvious weight
   function updateGravityFromSensor(){
     if (!engine) return;
-    if (sensorActive){
-      var gx = -smGx * gravFlipX, gy = smGy * gravFlipY;
-      var mag = Math.sqrt(gx*gx + gy*gy);
-      var baseMag = 2.4; // clearly heavier than Matter's own "1 = normal" default — real, obvious weight
-      var shakeBoost = (phase === "shaking") ? clamp(shakeIntensity, 0, 26) * 0.09 : 0;
-      var gravityMag = baseMag + shakeBoost;
-      if (mag > 0.6){ // enough of a clear tilt to trust a direction
-        engine.gravity.x = (gx / mag) * gravityMag;
-        engine.gravity.y = (gy / mag) * gravityMag;
-      } else { // phone reading close to flat / ambiguous — default straight down
-        engine.gravity.x = 0;
-        engine.gravity.y = gravityMag;
-      }
-    } else {
-      engine.gravity.x = 0;
-      engine.gravity.y = 1; // plain default gravity until/unless we ever get real sensor data
-    }
+    engine.gravity.x = 0;
+    engine.gravity.y = BASE_GRAVITY;
   }
 
-  // A single shared gravity vector (above) can only ever translate every ball
-  // together, in lockstep, like one solid block — because every body feels
-  // *exactly* the same force at the same instant. Real shaking is chaotic:
-  // countless per-object wall/ball micro-collisions happen at slightly
-  // different times and angles, which is what actually scatters the balls
-  // instead of letting them drift as one clump. This adds that missing
-  // per-ball randomness — a small independent kick for every single ball,
-  // scaled by how hard the phone is currently being shaken — layered on TOP
-  // of (never instead of) the real gravity direction above. It runs for the
-  // whole "shaking" phase regardless of whether we have a real sensor reading
-  // or are using the press-and-hold fallback, since shakeIntensity already
-  // reflects either source identically.
+  // A shared gravity vector can only ever translate every ball together, in
+  // lockstep, like one solid block — every body feels *exactly* the same
+  // force at the same instant, so it can never by itself be what separates
+  // balls from each other. What actually has to do that job is this function:
+  // a strong, fully independent per-ball velocity kick, redrawn at random
+  // every single frame, sized by how hard the phone is being shaken. Adding
+  // directly to velocity (not a tiny force that has to fight frictionAir for
+  // several frames before it's even visible) is what makes this an
+  // immediately visible per-ball scatter instead of a sluggish nudge — this
+  // is deliberately the dominant force during an actual shake, gravity is
+  // secondary. Runs for the whole "shaking" phase regardless of whether we
+  // have a real sensor reading or are using the press-and-hold fallback,
+  // since shakeIntensity already reflects either source identically.
   function applyShakeAgitation(dtScale){
     var M = Matter;
-    var jitterMag = clamp(shakeIntensity, 0, 26);
+    var kick = clamp(shakeIntensity, 0, 26) * 0.55 * dtScale;
     ballBodies.forEach(function(b){
-      var kJitter = 0.0034 * jitterMag * dtScale;
-      M.Body.applyForce(b, b.position, {
-        x: (Math.random()-0.5) * kJitter * b.mass,
-        y: (Math.random()-0.5) * kJitter * 0.9 * b.mass
+      var v = b.velocity;
+      M.Body.setVelocity(b, {
+        x: v.x + (Math.random() - 0.5) * kick,
+        y: v.y + (Math.random() - 0.5) * kick
       });
     });
   }
 
-  var MAX_BALL_SPEED = 32; // world-units/step safety cap — keeps a snappy feel while still stopping tunneling
+  var MAX_BALL_SPEED = 40; // world-units/step safety cap — keeps a snappy feel while still stopping tunneling
   function capBallMotion(){
     var M = Matter;
     ballBodies.forEach(function(b){
@@ -1129,10 +1055,10 @@
 
     if (fallbackHold && !sensorActive){ registerIntensity(18); }
 
-    updateGravityFromSensor(); // every frame, every phase — the box always follows however the phone is actually oriented/moving right now
+    updateGravityFromSensor(); // constant, always straight down — see comment above the function
 
     if (phase === "shaking"){
-      applyShakeAgitation(dt/16.67); // per-ball noise on top of the shared gravity direction — see comment above the function
+      applyShakeAgitation(dt/16.67); // strong independent per-ball scatter — see comment above the function
       if (belowSinceAt && performance.now() - belowSinceAt > SHAKE_OFF_HOLD){
         setPhase("settling");
         settleQuietSinceAt = 0;
@@ -1143,27 +1069,6 @@
     capBallMotion();
     updateDepth(dt/16.67);
     balls = composeBalls();
-
-    // Once the round is done, smoothly snap every ball from wherever it
-    // physically settled into its numbered pocket at the bottom of the box —
-    // see the comment above pocketXFor() for why this is a render-layer reveal
-    // rather than literal tiny physical holes. This overrides `balls` (which
-    // broadcastTick() below reads), so viewers see the exact same snap.
-    if (phase === "done" && pocketPositions){
-      var snapT = clamp((performance.now() - resultSnapStartAt) / RESULT_SNAP_MS, 0, 1);
-      var ease = 1 - Math.pow(1 - snapT, 3); // ease-out cubic
-      balls = balls.map(function(b, i){
-        var from = (resultSnapFrom && resultSnapFrom[i]) || { x: b.x, y: b.y };
-        var to = pocketPositions[i];
-        if (!to) return b;
-        return {
-          x: from.x + (to.x - from.x) * ease,
-          y: from.y + (to.y - from.y) * ease,
-          a: b.a, r: b.r, color: b.color, textColor: b.textColor, label: b.label,
-          z: b.z * (1 - ease) // settle flat against the front glass as it snaps into its pocket
-        };
-      });
-    }
 
     if (phase === "settling"){
       var maxSpeed = 0;
@@ -1193,22 +1098,10 @@
   var settleStartedAt = 0, tickAccum = 0;
 
   function finishRound(){
-    // Determine order the same way as before (final left-to-right position,
-    // top-to-bottom as a tiebreaker) — pockets are a visualization of this
-    // order, not a different ranking rule.
-    var order = ballBodies.map(function(b, i){ return { i:i, x:b.position.x, y:b.position.y }; })
-      .sort(function(a,b){
-        if (Math.abs(a.x - b.x) > 2) return a.x - b.x;
-        return a.y - b.y;
-      });
-    var ranked = order.map(function(o){ return ballBodies[o.i].plugin.name; });
-    var n = roster.length;
-    pocketPositions = new Array(ballBodies.length);
-    order.forEach(function(o, rankIdx){
-      pocketPositions[o.i] = { x: pocketXFor(rankIdx, n), y: WORLD_H * POCKET_Y_FRAC };
-    });
-    resultSnapFrom = balls.map(function(b){ return { x:b.x, y:b.y }; });
-    resultSnapStartAt = performance.now();
+    var ranked = ballBodies.slice().sort(function(a,b){
+      if (Math.abs(a.position.x - b.position.x) > 2) return a.position.x - b.position.x;
+      return a.position.y - b.position.y;
+    }).map(function(b){ return b.plugin.name; });
     lastRanking = ranked;
     setPhase("done");
     showResult(ranked, true);
@@ -1222,7 +1115,6 @@
       M.Body.setVelocity(b, { x:(Math.random()-0.5)*10, y:(Math.random()-0.5)*10 - 4 });
     });
     lastRanking = null;
-    pocketPositions = null; resultSnapFrom = null;
     resultActions.classList.add("hidden");
     setPhase("shaking");
     registerIntensity(SHAKE_ON + 3);
@@ -1232,7 +1124,6 @@
     roundId = Date.now();
     buildWorld();
     lastRanking = null;
-    pocketPositions = null; resultSnapFrom = null;
     resultActions.classList.add("hidden");
     setPhase("ready");
     broadcastEvent("init", { roster: roster, roundId: roundId });
@@ -1304,7 +1195,6 @@
     ctx.scale(scale, scale);
 
     drawBoxWireframe();
-    drawPockets();
 
     // draw far (larger z) balls first so nearer ones correctly occlude them —
     // this, plus the size/position shift, is what actually reads as depth
