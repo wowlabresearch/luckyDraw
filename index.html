@@ -614,9 +614,9 @@
     return name.slice(0,3).toUpperCase();
   }
   function radiusFor(n){
-    var areaPerBall = 0.22 * (WORLD_W*WORLD_H) / Math.max(n,1);
+    var areaPerBall = 0.32 * (WORLD_W*WORLD_H) / Math.max(n,1);
     var r = Math.sqrt(areaPerBall / Math.PI);
-    return Math.max(16, Math.min(55, r));
+    return Math.max(20, Math.min(70, r));
   }
 
   function renderRosterList(){
@@ -798,7 +798,7 @@
         // fall speed (gravity is mass-independent in Matter) but because
         // heavier bodies hit each other with more momentum, which is what
         // actually reads as "weight" in a pile of balls being thrown around
-        restitution: 0.68, friction: 0.03, frictionAir: 0.002, density: 0.0032
+        restitution: 0.8, friction: 0.02, frictionAir: 0.002, density: 0.0032
       });
       body.plugin = { name: name, color: colorFor(i), textColor: textColorFor(i), label: labelFor(name) };
       return body;
@@ -830,7 +830,11 @@
     var damp = shaking ? 0.90 : 0.80;
     ballDepth.forEach(function(d){
       if (shaking){
-        d.vz += (smGz * 0.00075 + (Math.random()-0.5) * 0.0016 * clamp(shakeIntensity,0,26)) * dtScale;
+        // jGz (not raw smGz) — see the comment above onDeviceMotion. Using the
+        // high-passed value means this responds to actual front/back shaking
+        // motion instead of whatever constant offset the phone's steady tilt
+        // happens to put on the z-axis.
+        d.vz += (jGz * 0.02 + (Math.random()-0.5) * 0.0016 * clamp(shakeIntensity,0,26)) * dtScale;
       }
       d.vz += (rest - d.z) * springK * dtScale;
       d.vz *= damp;
@@ -873,24 +877,37 @@
   // lockstep, like one solid block — every body feels *exactly* the same
   // force at the same instant, so it can never by itself be what separates
   // balls from each other. What actually has to do that job is this function:
-  // a strong, fully independent per-ball velocity kick, redrawn at random
-  // every single frame, sized by how hard the phone is being shaken. Adding
-  // directly to velocity (not a tiny force that has to fight frictionAir for
-  // several frames before it's even visible) is what makes this an
-  // immediately visible per-ball scatter instead of a sluggish nudge — this
-  // is deliberately the dominant force during an actual shake, gravity is
-  // secondary. Runs for the whole "shaking" phase regardless of whether we
-  // have a real sensor reading or are using the press-and-hold fallback,
-  // since shakeIntensity already reflects either source identically.
+  // a strong, per-ball velocity kick, redrawn every single frame, sized by
+  // how hard the phone is being shaken. Adding directly to velocity (not a
+  // tiny force that has to fight frictionAir for several frames before it's
+  // even visible) is what makes this an immediately visible scatter instead
+  // of a sluggish nudge.
+  //
+  // The kick has two parts blended together: a DIRECTIONAL part (jGx, jGy —
+  // see the comment above onDeviceMotion) that points along whichever axis
+  // you're actually shaking right now, shared by every ball — this is what
+  // makes shaking side-to-side visibly throw balls left-right, shaking
+  // up-down throw them up-down, etc. — plus a fully independent RANDOM part
+  // per ball, which is still needed so balls scatter from and bounce off each
+  // other instead of moving as one rigid block even while sharing the same
+  // overall shake direction. Runs for the whole "shaking" phase regardless of
+  // whether we have a real sensor reading or the press-and-hold fallback
+  // (which has no directional signal, so it falls back to pure random).
   function applyShakeAgitation(dtScale){
     var M = Matter;
-    var kick = clamp(shakeIntensity, 0, 26) * 0.55 * dtScale;
+    var mag = clamp(shakeIntensity, 0, 26);
+    var kick = mag * 0.55 * dtScale;
+    var bmag = Math.sqrt(jGx*jGx + jGy*jGy);
+    var haveDirection = sensorActive && bmag > 0.35;
+    var dirX = haveDirection ? (-jGx / bmag) : 0; // sign matches the world.x flip used everywhere else in this file
+    var dirY = haveDirection ? (jGy / bmag) : 0;
+    var DIRECTIONAL_BIAS = haveDirection ? 0.65 : 0; // 0 = pure random, 1 = fully locked to the shake axis
     ballBodies.forEach(function(b){
       var v = b.velocity;
-      M.Body.setVelocity(b, {
-        x: v.x + (Math.random() - 0.5) * kick,
-        y: v.y + (Math.random() - 0.5) * kick
-      });
+      var rx = (Math.random()-0.5)*2, ry = (Math.random()-0.5)*2;
+      var kx = (dirX*DIRECTIONAL_BIAS + rx*(1-DIRECTIONAL_BIAS)) * kick;
+      var ky = (dirY*DIRECTIONAL_BIAS + ry*(1-DIRECTIONAL_BIAS)) * kick;
+      M.Body.setVelocity(b, { x: v.x + kx, y: v.y + ky });
     });
   }
 
@@ -960,17 +977,26 @@
     });
   }
 
-  // NEW MODEL: "the phone IS the box". Rather than trying to detect a discrete
-  // "shake" and inject a separate force, we just point the physics engine's own
-  // gravity directly at the phone's raw accelerationIncludingGravity every frame.
-  // At rest that vector IS gravity (properly rotated for however you're holding
-  // the phone — tilt the phone, the box tilts). While shaking, that same reading
-  // swings wildly in magnitude and direction because it's total sensed
-  // acceleration (gravity + the phone's own motion) — which is exactly the
-  // pseudo-force a container's contents feel while the container is thrown
-  // around. One physical quantity, no separate "shake detector" needed.
-  var GDIV = 9.81; // 1g, so a resting phone reproduces matter.js's normal-feeling default gravity
-  var smGx = 0, smGy = 0, smGz = 0;
+  // DIRECTIONAL SHAKE MODEL. Gravity itself is constant/down-only (see
+  // updateGravityFromSensor above) because accelerationIncludingGravity's
+  // absolute sign for "which way is down" proved unreliable in practice. But
+  // the CHANGE in that reading — how it's moving right now relative to how it
+  // was sitting a moment ago — doesn't have that problem, because it's a
+  // relative delta against the device's own recent history, not a mapping to
+  // an absolute world direction. So we track two smoothings of the same
+  // signal: a fast one (smGx/y/z, reacts almost immediately) and a slow one
+  // (blGx/y/z, "baseline" — tracks the phone's steady resting orientation).
+  // Their difference (jGx/y/z) is a live, self-calibrating measurement of
+  // "how far off resting is this axis right now" — which is exactly what
+  // "shaking mostly left-right" vs "mostly up-down" vs "mostly toward/away
+  // from you" looks like, per axis, without ever needing to know which way is
+  // absolute "down". applyShakeAgitation() below uses jGx/jGy to steer the
+  // per-ball kicks toward whichever axis you're actually shaking along, and
+  // updateDepth() uses jGz the same way for front/back (into/out of the box).
+  var GDIV = 9.81; // 1g, informational — how far a reading departs from "just sitting there at 1g"
+  var smGx = 0, smGy = 0, smGz = 0;       // fast smoothing — near-instant
+  var blGx = 0, blGy = 0, blGz = 0;       // slow smoothing — "resting" baseline
+  var jGx = 0, jGy = 0, jGz = 0;          // fast minus slow = live per-axis shake direction
   var lastMotionEventAt = 0, motionEventCount = 0;
   // ring buffer of raw ax/ay/az for the on-screen debug graph
   var DEBUG_BUF_LEN = 160;
@@ -994,6 +1020,13 @@
     smGx = smGx*0.35 + gx*0.65;
     smGy = smGy*0.35 + gy*0.65;
     smGz = smGz*0.35 + gz*0.65;
+    // heavy smoothing — tracks the slow-moving "how is the phone oriented on
+    // average right now" baseline, deliberately laggy so a fast shake doesn't
+    // drag it along (which would erase the very deviation we want to measure)
+    blGx = blGx*0.965 + gx*0.035;
+    blGy = blGy*0.965 + gy*0.035;
+    blGz = blGz*0.965 + gz*0.035;
+    jGx = smGx - blGx; jGy = smGy - blGy; jGz = smGz - blGz;
     var totalMag = Math.sqrt(gx*gx + gy*gy + gz*gz);
     registerIntensity(Math.abs(totalMag - GDIV)); // how far this reading departs from "just sitting there at 1g"
   }
