@@ -848,29 +848,37 @@
 
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
-  // REDESIGNED after real-device testing kept surfacing sign/axis problems
-  // (balls floating, then balls slamming into the *ceiling* the instant the
-  // gyro turned on). accelerationIncludingGravity's x/y sign convention for
-  // "phone held upright" has proven unreliable to pin down and inconsistent
-  // in practice, and getting it wrong doesn't fail quietly — it visibly
-  // launches every ball at once, in the same wrong direction, which is
-  // also a big part of why balls looked like they were "stuck together": a
-  // uniform force (right or wrong direction) slamming a whole grid of balls
-  // into the same wall at the same instant packs them into a tight cluster
-  // right at that wall, and gravity alone never pushes them apart sideways.
-  //
-  // So gravity direction is no longer derived from the sensor at all. Down is
-  // always straight down on screen, at a constant, deliberately heavy
-  // magnitude — exactly like every simple 2D physics box, with zero chance of
-  // ever pointing the wrong way. Shake strength (from the sensor, but as pure
-  // magnitude — direction never enters into it) only affects how hard
-  // applyShakeAgitation() below throws the balls around; it doesn't touch
-  // gravity itself.
+  // Gravity direction now follows the phone's slow-changing ORIENTATION
+  // (blGx/blGy — the heavily-smoothed baseline from onDeviceMotion, not the
+  // fast smGx/smGy) rather than being locked straight down. Using the slow
+  // baseline instead of the instant reading is what avoids the original bug:
+  // during an actual shake, the instant reading swings wildly in both
+  // magnitude and direction every frame, so deriving gravity from IT directly
+  // meant gravity itself thrashed around during shaking — including, once, a
+  // sign error that sent every ball to the ceiling the instant the gyro
+  // turned on. The slow baseline only drifts when you deliberately reorient
+  // the phone (tilt it, flip it upside down), and barely moves during a fast
+  // shake — so gravity direction stays stable and correct while you're
+  // shaking, and only actually changes when you mean it to. Empirically
+  // confirmed on-device: holding the phone upright normally must map to
+  // NEGATIVE device-Y, hence the "-" below.
   var BASE_GRAVITY = 2.6; // well above Matter's own "1 = normal" default — real, obvious weight
   function updateGravityFromSensor(){
     if (!engine) return;
-    engine.gravity.x = 0;
-    engine.gravity.y = BASE_GRAVITY;
+    if (sensorActive){
+      var gx = -blGx, gy = -blGy;
+      var mag = Math.sqrt(gx*gx + gy*gy);
+      if (mag > 0.6){ // a clear enough tilt to trust a direction
+        engine.gravity.x = (gx / mag) * BASE_GRAVITY;
+        engine.gravity.y = (gy / mag) * BASE_GRAVITY;
+      } else { // phone close to flat / ambiguous — default straight down rather than risk a near-zero or noisy direction
+        engine.gravity.x = 0;
+        engine.gravity.y = BASE_GRAVITY;
+      }
+    } else {
+      engine.gravity.x = 0;
+      engine.gravity.y = 1; // plain default until/unless we ever get real sensor data
+    }
   }
 
   // A shared gravity vector can only ever translate every ball together, in
@@ -1088,7 +1096,7 @@
 
     if (fallbackHold && !sensorActive){ registerIntensity(18); }
 
-    updateGravityFromSensor(); // constant, always straight down — see comment above the function
+    updateGravityFromSensor(); // follows slow phone orientation — see comment above the function
 
     if (phase === "shaking"){
       applyShakeAgitation(dt/16.67); // strong independent per-ball scatter — see comment above the function
@@ -1217,6 +1225,27 @@
     };
   }
 
+  // A flat shadow, anchored at the ball's TRUE (un-projected) position on the
+  // front glass — while the ball itself gets drawn shifted back and shrunk by
+  // projectDepth() above. The growing gap between a ball and its own shadow
+  // as z increases is the depth cue: the same reason a tossed ball's shadow
+  // stays on the ground while the ball is up in the air. No blur/gradient —
+  // just a flat, low-opacity ellipse — to stay consistent with the rest of
+  // the flat design.
+  function drawShadow(b){
+    var z = b.z || 0;
+    var sx = b.x, sy = b.y + b.r * 0.55;
+    var rx = Math.max(1, b.r * (1 - z*0.25));
+    var ry = Math.max(1, b.r * 0.4 * (1 - z*0.25));
+    ctx.save();
+    ctx.globalAlpha = 0.16 * (1 - z*0.45);
+    ctx.fillStyle = "#15161A";
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawScene(){
     var w = canvas.width, h = canvas.height;
     if (!w || !h) return;
@@ -1232,6 +1261,7 @@
     // draw far (larger z) balls first so nearer ones correctly occlude them —
     // this, plus the size/position shift, is what actually reads as depth
     var ordered = balls.slice().sort(function(a,b){ return (b.z||0) - (a.z||0); });
+    ordered.forEach(drawShadow); // all shadows first, flat on the "floor", under every ball
     ordered.forEach(function(b){
       var p = projectDepth(b.x, b.y, b.r, b.z);
       ctx.save();
