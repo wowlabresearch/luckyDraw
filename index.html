@@ -320,6 +320,12 @@
           <button class="btn btn-ghost" id="editRosterBtn">명단 변경</button>
         </div>
         <div class="sensor-note" id="sensorNote">자이로 센서: 확인 중…</div>
+        <div class="deck-controls">
+          <span class="sensor-note" style="align-self:center;">중력/흔들림 방향이 반대로 느껴지면:</span>
+          <button class="btn btn-ghost" id="flipXBtn" type="button">X 반전</button>
+          <button class="btn btn-ghost" id="flipYBtn" type="button">Y 반전</button>
+          <button class="btn btn-ghost" id="flipZBtn" type="button">Z 반전</button>
+        </div>
         <div class="debug-wrap">
           <div class="debug-legend">
             <span><i class="sw" style="background:#FF3B2F"></i>X</span>
@@ -355,30 +361,32 @@
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script>
 (function(){
   "use strict";
 
-  /* ============================= constants ============================= */
-  var WORLD_W = 1000, WORLD_H = 650;
+  /* ============================= constants =============================
+     Real 3D rewrite: Cannon.js (physics) + Three.js (WebGL rendering)
+     replace Matter.js + Canvas2D. The box is a genuine 3D volume — X
+     (left/right), Y (up/down, Cannon/Three convention: up is positive),
+     Z (front/back — positive Z is toward the camera / front glass,
+     negative Z is the back wall). Device motion x/y/z map 1:1 onto these
+     world axes (see the sensor section below), so tilt/shake response is
+     symmetric across all three axes instead of Z being a fake spring hack. */
+  var BOX_W = 10, BOX_H = 6.6, BOX_D = 6.2; // physics + render world units (meters-ish)
   var TICK_MS = 70;          // broadcast interval to viewers while a round is live
   var SHAKE_ON = 7;          // m/s^2 deviation to count as "shaking"
   var SHAKE_OFF_HOLD = 650;  // ms below threshold before we call it "stopped"
-  var SETTLE_SPEED = 0.06;   // matter.js body.speed considered "at rest"
+  var SETTLE_SPEED = 0.09;   // cannon body.velocity length (units/s) considered "at rest"
   var SETTLE_HOLD = 550;     // ms all bodies must stay under SETTLE_SPEED
   var SETTLE_TIMEOUT = 7000; // hard cap so a round can't hang forever
   var PEER_ID_PREFIX = "luckydrum7f3-"; // namespaces our ids on the public PeerJS broker
 
   var HANGUL_RE = /[ㄱ-힝]/;
   var NUMERIC_RE = /^[0-9]+$/;
-
-  // The "back wall" rectangle for the fake-3D box: balls at depth z=1 are drawn
-  // shrunk and shifted toward this rect; z=0 sits at the true (real, physics) x/y.
-  var BOX_BACK = { x0: WORLD_W*0.14, x1: WORLD_W*0.86, y0: WORLD_H*0.09, y1: WORLD_H*0.80 };
-  var BOX_BACK_SCALE_X = (BOX_BACK.x1-BOX_BACK.x0) / WORLD_W;
-  var BOX_BACK_SCALE_Y = (BOX_BACK.y1-BOX_BACK.y0) / WORLD_H;
 
   /* ============================= dom refs ============================= */
   var $ = function(id){ return document.getElementById(id); };
@@ -389,6 +397,7 @@
   var pickController = $("pickController"), pickViewer = $("pickViewer");
   var controllerDeck = $("controllerDeck"), viewerNote = $("viewerNote");
   var shakeBtn = $("shakeBtn"), meterFill = $("meterFill"), sensorNote = $("sensorNote");
+  var flipXBtn = $("flipXBtn"), flipYBtn = $("flipYBtn"), flipZBtn = $("flipZBtn");
   var reshuffleBtn = $("reshuffleBtn"), newRoundBtn = $("newRoundBtn"), editRosterBtn = $("editRosterBtn");
   var fullResetBtn = $("fullResetBtn");
   var phaseReadout = $("phaseReadout"), roleTag = $("roleTag");
@@ -398,8 +407,7 @@
   var dotController = $("dotController"), dotViewer = $("dotViewer");
   var cntController = $("cntController"), cntViewer = $("cntViewer");
   var peerCodeText = $("peerCodeText"), copyCodeBtn = $("copyCodeBtn");
-  var canvas = $("drum");
-  var ctx = canvas.getContext("2d");
+  var canvas = $("drum"); // WebGL surface — owned by the Three.js renderer (see ensureScene3D), no 2d context here
   var debugCanvas = $("debugGraph");
   var debugCtx = debugCanvas.getContext("2d");
 
@@ -510,7 +518,12 @@
   }
   function broadcastTick(){
     if (!viewerConns.length) return;
-    var payload = balls.map(function(b){ return [Math.round(b.x), Math.round(b.y*10)/10, Math.round(b.a*100)/100, Math.round((b.z||0)*100)/100]; });
+    // 3D positions only (x,y,z) — no rotation is synced. Ball rotation isn't
+    // simulated visually at all (see ensureBallMeshPool/render3D below): labels
+    // are camera-facing sprites rather than textures baked onto the spinning
+    // sphere, so host and viewer stay pixel-identical without needing quaternion
+    // data on the wire.
+    var payload = balls.map(function(b){ return [Math.round(b.x*100)/100, Math.round(b.y*100)/100, Math.round(b.z*100)/100]; });
     broadcastToViewers({ kind:"tick", roundId: roundId, phase: phase, b: payload });
   }
   function broadcastEvent(type, data){
@@ -523,7 +536,7 @@
     conn.send({
       kind: "full",
       roster: roster, phase: phase, roundId: roundId,
-      balls: balls.map(function(b){ return [Math.round(b.x), Math.round(b.y), Math.round((b.z||0)*100)/100]; }),
+      balls: balls.map(function(b){ return [Math.round(b.x*100)/100, Math.round(b.y*100)/100, Math.round(b.z*100)/100]; }),
       ranking: lastRanking
     });
   }
@@ -555,6 +568,8 @@
       setPhase("ready", true);
       prevSnap = curSnap = null;
       if (setupCard.classList.contains("hidden") === false) enterMachine();
+      ensureScene3D();
+      ensureBallMeshPool(roster.length);
     } else if (msg.type === "result"){
       if (msg.roundId === roundId) showResult(msg.ranking, true);
     } else if (msg.type === "reset"){
@@ -571,6 +586,8 @@
       renderRosterList();
     }
     if (msg.roundId) roundId = msg.roundId;
+    ensureScene3D();
+    ensureBallMeshPool(roster.length);
     if (Array.isArray(msg.balls)) applySnapshotBalls(msg.balls);
     setPhase(msg.phase || "idle", true);
     if (msg.phase === "done" && Array.isArray(msg.ranking)) showResult(msg.ranking, true);
@@ -579,9 +596,8 @@
   }
 
   function applySnapshotBalls(pairs){
-    var n = roster.length;
     balls = pairs.map(function(p, i){
-      return { x:p[0], y:p[1], a:0, r:radiusFor(n), z:p[2]||0, color: colorFor(i), textColor: textColorFor(i), label: labelFor(roster[i]||"") };
+      return { x:p[0], y:p[1], z:p[2]||0, color: colorFor(i), textColor: textColorFor(i), label: labelFor(roster[i]||"") };
     });
   }
 
@@ -614,9 +630,9 @@
     return name.slice(0,3).toUpperCase();
   }
   function radiusFor(n){
-    var areaPerBall = 0.32 * (WORLD_W*WORLD_H) / Math.max(n,1);
-    var r = Math.sqrt(areaPerBall / Math.PI);
-    return Math.max(20, Math.min(70, r));
+    var volPerBall = 0.30 * (BOX_W*BOX_H*BOX_D) / Math.max(n,1);
+    var r = Math.cbrt(volPerBall / ((4/3)*Math.PI));
+    return Math.max(0.28, Math.min(1.05, r));
   }
 
   function renderRosterList(){
@@ -673,6 +689,7 @@
     machineLayout.classList.remove("hidden");
     controllerDeck.classList.toggle("hidden", role !== "controller");
     viewerNote.classList.toggle("hidden", role === "controller");
+    ensureScene3D();
     resizeCanvas();
     if (role === "controller") setupSensors();
     else { dotViewer.classList.add("on"); cntViewer.textContent = "1"; }
@@ -701,6 +718,7 @@
   fullResetBtn.addEventListener("click", function(){
     if (!confirm("명단과 결과를 모두 초기화할까요?")) return;
     roster = []; balls = []; lastRanking = null; roundId = 0;
+    disposeBallMeshPool();
     rosterInput.value = ""; updateRosterCount();
     setPhase("idle");
     machineLayout.classList.add("hidden");
@@ -717,10 +735,15 @@
 
   /* ============================= canvas sizing ============================= */
   function resizeCanvas(){
-    var rect = canvas.getBoundingClientRect();
     var dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
+    if (renderer3D && camera3D){
+      var rect = canvas.getBoundingClientRect();
+      if (rect.width && rect.height){
+        renderer3D.setSize(rect.width, rect.height, false);
+        camera3D.aspect = rect.width / rect.height;
+        camera3D.updateProjectionMatrix();
+      }
+    }
     var drect = debugCanvas.getBoundingClientRect();
     if (drect.width){
       debugCanvas.width = Math.round(drect.width * dpr);
@@ -764,168 +787,314 @@
     }
   }
 
-  /* ============================= matter.js world (controller only) ============================= */
-  var engine, world, wallBodies = [], ballBodies = [], ballDepth = [];
-  var shakeEngaged = false, shakeIntensity = 0;
+  /* ============================= three.js scene (both roles) ============================= */
+  // Both the controller AND every viewer build the exact same 3D scene (same
+  // box, same lights, same camera) — a viewer just feeds it positions received
+  // over the wire instead of a local physics world. That's what guarantees the
+  // spectator sees a pixel-identical picture instead of an approximation.
+  var scene3D = null, camera3D = null, renderer3D = null, dirLight3D = null;
+  var ballMeshPool = [];
+  var SPHERE_GEO_CACHE = {}, OUTLINE_GEO_CACHE = {}, BALL_MAT_CACHE = {}, OUTLINE_MAT = null;
+
+  function ensureScene3D(){
+    if (scene3D) { resizeCanvas(); return; }
+    if (typeof THREE === "undefined"){
+      sensorNote.textContent = "3D 렌더러(Three.js)를 불러오지 못했어요 — 인터넷 연결을 확인하고 새로고침 해보세요.";
+      return;
+    }
+    scene3D = new THREE.Scene();
+    scene3D.background = new THREE.Color(0xF6F4EC); // --paper
+
+    camera3D = new THREE.PerspectiveCamera(42, 1, 0.05, 100);
+    camera3D.position.set(0, BOX_H*0.74, BOX_D*2.05);
+    camera3D.lookAt(0, BOX_H*0.36, 0);
+
+    renderer3D = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    renderer3D.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer3D.shadowMap.enabled = true;
+    renderer3D.shadowMap.type = THREE.PCFShadowMap; // crisper edges than soft PCF — matches the flat, hairline design
+
+    scene3D.add(new THREE.AmbientLight(0xffffff, 0.62));
+    dirLight3D = new THREE.DirectionalLight(0xffffff, 0.85);
+    dirLight3D.position.set(BOX_W*0.35, BOX_H*2.4, BOX_D*1.15);
+    dirLight3D.target.position.set(0, BOX_H*0.25, 0);
+    dirLight3D.castShadow = true;
+    dirLight3D.shadow.mapSize.width = 1024;
+    dirLight3D.shadow.mapSize.height = 1024;
+    dirLight3D.shadow.camera.left = -BOX_W*0.9; dirLight3D.shadow.camera.right = BOX_W*0.9;
+    dirLight3D.shadow.camera.top = BOX_D*0.9; dirLight3D.shadow.camera.bottom = -BOX_D*0.9;
+    dirLight3D.shadow.camera.near = 0.5; dirLight3D.shadow.camera.far = BOX_H*6;
+    dirLight3D.shadow.bias = -0.003;
+    scene3D.add(dirLight3D); scene3D.add(dirLight3D.target);
+
+    var floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(BOX_W, BOX_D),
+      new THREE.MeshStandardMaterial({ color:0xF6F4EC, roughness:1, metalness:0 })
+    );
+    floor.rotation.x = -Math.PI/2;
+    floor.receiveShadow = true;
+    scene3D.add(floor);
+
+    var back = new THREE.Mesh(
+      new THREE.PlaneGeometry(BOX_W, BOX_H),
+      new THREE.MeshStandardMaterial({ color:0xEFEBDD, roughness:1, metalness:0 })
+    );
+    back.position.set(0, BOX_H/2, -BOX_D/2);
+    back.receiveShadow = true;
+    scene3D.add(back);
+
+    // Flat black hairline box edges — the real 3D box, so the shadow it casts
+    // onto the floor/back wall is geometrically guaranteed to line up with it
+    // (this is precisely what the fake-2.5D wireframe could never guarantee).
+    var edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(BOX_W, BOX_H, BOX_D)),
+      new THREE.LineBasicMaterial({ color: 0x15161A })
+    );
+    edges.position.set(0, BOX_H/2, 0);
+    scene3D.add(edges);
+
+    OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x15161A, side: THREE.BackSide });
+
+    resizeCanvas();
+  }
+
+  function getSphereGeo(r){
+    var k = Math.round(r*1000);
+    if (!SPHERE_GEO_CACHE[k]) SPHERE_GEO_CACHE[k] = new THREE.SphereGeometry(r, 20, 16);
+    return SPHERE_GEO_CACHE[k];
+  }
+  function getOutlineGeo(r){
+    var k = Math.round(r*1000);
+    if (!OUTLINE_GEO_CACHE[k]) OUTLINE_GEO_CACHE[k] = new THREE.SphereGeometry(r*1.06, 14, 10);
+    return OUTLINE_GEO_CACHE[k];
+  }
+  function getBallMat(hex){
+    if (!BALL_MAT_CACHE[hex]) BALL_MAT_CACHE[hex] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.95, metalness: 0 });
+    return BALL_MAT_CACHE[hex];
+  }
+  // Labels are camera-facing sprites, not a texture wrapped around the (freely
+  // tumbling) sphere — that decouples "does the ball look right" from "is the
+  // label readable", and means we never need to sync rotation over the wire.
+  function makeLabelSprite(text, textColor){
+    var cv = document.createElement("canvas");
+    cv.width = 128; cv.height = 128;
+    var c = cv.getContext("2d");
+    c.fillStyle = textColor || "#15161A";
+    c.font = "700 44px 'JetBrains Mono', monospace";
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText(text, 64, 68);
+    var tex = new THREE.CanvasTexture(cv);
+    var mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+    return new THREE.Sprite(mat);
+  }
+  function disposeBallMeshPool(){
+    ballMeshPool.forEach(function(m){
+      if (!scene3D) return;
+      scene3D.remove(m.group);
+      scene3D.remove(m.sprite);
+      m.sprite.material.map.dispose();
+      m.sprite.material.dispose();
+    });
+    ballMeshPool = [];
+  }
+  function ensureBallMeshPool(n){
+    if (!scene3D) return;
+    disposeBallMeshPool();
+    var r = radiusFor(n);
+    for (var i=0;i<n;i++){
+      var sphere = new THREE.Mesh(getSphereGeo(r), getBallMat(colorFor(i)));
+      sphere.castShadow = true; sphere.receiveShadow = true;
+      var outline = new THREE.Mesh(getOutlineGeo(r), OUTLINE_MAT);
+      var group = new THREE.Group();
+      group.add(sphere); group.add(outline);
+      scene3D.add(group);
+      var sprite = makeLabelSprite(labelFor(roster[i]||""), textColorFor(i));
+      var sc = r*1.35;
+      sprite.scale.set(sc, sc, 1);
+      scene3D.add(sprite);
+      ballMeshPool.push({ group: group, sprite: sprite, r: r });
+    }
+  }
+  var tmpCamVec = null;
+  function updateBallMeshesFromArray(arr){
+    if (!scene3D || !camera3D) return;
+    if (!tmpCamVec) tmpCamVec = new THREE.Vector3();
+    var n = Math.min(ballMeshPool.length, arr.length);
+    for (var i=0;i<n;i++){
+      var b = arr[i], m = ballMeshPool[i];
+      m.group.position.set(b.x, b.y, b.z);
+      // Push each label sprite from the ball's center toward the camera by ~its
+      // radius, so it sits right at the ball's near surface: this keeps real
+      // depth-testing meaningful (a ball in front correctly covers a label on
+      // a ball behind it) instead of the label always winning or always losing.
+      tmpCamVec.set(camera3D.position.x-b.x, camera3D.position.y-b.y, camera3D.position.z-b.z);
+      var len = tmpCamVec.length() || 1;
+      m.sprite.position.set(b.x + tmpCamVec.x/len*m.r*1.04, b.y + tmpCamVec.y/len*m.r*1.04, b.z + tmpCamVec.z/len*m.r*1.04);
+    }
+  }
+  function render3D(){
+    if (!scene3D || !renderer3D || !camera3D) return;
+    updateBallMeshesFromArray(balls);
+    renderer3D.render(scene3D, camera3D);
+  }
+
+  /* ============================= cannon.js world (controller only) ============================= */
+  var world, ballBodies = [];
+  var shakeIntensity = 0;
   var lastAboveOnAt = 0, belowSinceAt = 0, settleQuietSinceAt = 0;
 
-  function buildWorld(){
-    var M = Matter;
-    engine = M.Engine.create({ positionIterations: 10, velocityIterations: 8 });
-    engine.gravity.y = 1;
-    world = engine.world;
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
-    var t = 60; // wall thickness — extra margin against high-speed tunneling
-    wallBodies = [
-      M.Bodies.rectangle(WORLD_W/2, -t/2, WORLD_W + t*2, t, { isStatic:true }),
-      M.Bodies.rectangle(WORLD_W/2, WORLD_H + t/2, WORLD_W + t*2, t, { isStatic:true }),
-      M.Bodies.rectangle(-t/2, WORLD_H/2, t, WORLD_H + t*2, { isStatic:true }),
-      M.Bodies.rectangle(WORLD_W + t/2, WORLD_H/2, t, WORLD_H + t*2, { isStatic:true })
-    ];
-    M.World.add(world, wallBodies);
+  function buildWorld(){
+    world = new CANNON.World();
+    world.gravity.set(0, -BASE_GRAVITY, 0);
+    world.broadphase = new CANNON.NaiveBroadphase();
+    world.solver.iterations = 12;
+
+    var wallMat = new CANNON.Material("wall");
+    var ballMat = new CANNON.Material("ball");
+    world.addContactMaterial(new CANNON.ContactMaterial(wallMat, ballMat, { friction: 0.02, restitution: 0.75 }));
+    // "elastic soccer ball" pass: high restitution + low friction so balls visibly
+    // rebound off each other instead of thudding once and stopping dead.
+    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, ballMat, { friction: 0.015, restitution: 0.82 }));
+
+    var hw = BOX_W/2, hd = BOX_D/2;
+    function addWall(px, py, pz, axis, angle){
+      var b = new CANNON.Body({ mass: 0, material: wallMat });
+      b.addShape(new CANNON.Plane());
+      b.position.set(px, py, pz);
+      if (axis) b.quaternion.setFromAxisAngle(axis, angle);
+      world.addBody(b);
+    }
+    var AX = new CANNON.Vec3(1,0,0), AY = new CANNON.Vec3(0,1,0);
+    addWall(0, 0, 0, AX, -Math.PI/2);          // floor, normal up
+    addWall(0, BOX_H, 0, AX, Math.PI/2);       // ceiling, normal down
+    addWall(-hw, BOX_H/2, 0, AY, Math.PI/2);   // left wall, normal +x
+    addWall(hw, BOX_H/2, 0, AY, -Math.PI/2);   // right wall, normal -x
+    addWall(0, BOX_H/2, -hd, null, 0);         // back wall, normal +z (toward camera)
+    addWall(0, BOX_H/2, hd, AY, Math.PI);      // front wall (behind the camera), normal -z
 
     var r = radiusFor(roster.length);
-    var cols = Math.max(1, Math.floor((WORLD_W - 40) / (r*2 + 8)));
+    var gap = r*0.35, cell = r*2 + gap;
+    var cols = Math.max(1, Math.floor((BOX_W - r*2 - gap) / cell));
+    var layers = Math.max(1, Math.floor((BOX_D - r*2 - gap) / cell));
+    var perLayer = cols*layers;
     ballBodies = roster.map(function(name, i){
-      var col = i % cols, row = Math.floor(i / cols);
-      var x = 30 + r + col * (r*2 + 8) + (Math.random()*6-3);
-      var y = 30 + r + row * (r*2 + 8);
-      var body = M.Bodies.circle(x, y, r, {
-        // "elastic soccer ball" pass, pushed further: high restitution so
-        // they visibly rebound off each other and the walls instead of
-        // thudding once and stopping, very low friction/frictionAir so a
-        // bounce doesn't die out after one hit, and denser bodies — not for
-        // fall speed (gravity is mass-independent in Matter) but because
-        // heavier bodies hit each other with more momentum, which is what
-        // actually reads as "weight" in a pile of balls being thrown around
-        restitution: 0.8, friction: 0.02, frictionAir: 0.002, density: 0.0032
-      });
-      body.plugin = { name: name, color: colorFor(i), textColor: textColorFor(i), label: labelFor(name) };
+      var row = Math.floor(i/perLayer), rem = i%perLayer;
+      var col = rem%cols, layer = Math.floor(rem/cols);
+      var x = -BOX_W/2 + r + gap*0.5 + col*cell + (Math.random()*gap*0.4 - gap*0.2);
+      var z = -BOX_D/2 + r + gap*0.5 + layer*cell + (Math.random()*gap*0.4 - gap*0.2);
+      var y = Math.max(r + 0.05, BOX_H - r - gap*0.5 - row*cell);
+      // Heavier bodies hit each other with more momentum, which is what actually
+      // reads as "weight" in a pile of balls being thrown around (gravity itself
+      // is mass-independent, so this has to come from the bodies themselves).
+      var mass = Math.max(0.4, 1.4 * (4/3) * Math.PI * r*r*r);
+      var body = new CANNON.Body({ mass: mass, shape: new CANNON.Sphere(r), material: ballMat, linearDamping: 0.05, angularDamping: 0.2, allowSleep: false });
+      body.position.set(x, y, z);
+      body.appData = { name: name, label: labelFor(name) };
+      world.addBody(body);
       return body;
     });
-    M.World.add(world, ballBodies);
-    // Depth (z) is not real 2D-physics collision — it's a lightweight parallel state
-    // per ball, driven by the phone's z-axis (front/back) acceleration, that fakes
-    // "into the box / out toward you" motion so the box doesn't feel like a single
-    // flat plane. 0 = right up against the front glass, 1 = pressed to the back wall.
-    ballDepth = ballBodies.map(function(){ return { z: 0.25 + Math.random()*0.35, vz: 0 }; });
     balls = composeBalls();
+    ensureBallMeshPool(roster.length);
   }
 
-  function bodyToRenderBall(b, i){
-    var d = ballDepth[i] || { z: 0 };
-    return { x:b.position.x, y:b.position.y, a:b.angle, r:b.circleRadius, color:b.plugin.color, textColor:b.plugin.textColor, label:b.plugin.label, z:d.z };
-  }
   function composeBalls(){
-    return ballBodies.map(bodyToRenderBall);
-  }
-
-  // Advances the fake depth axis: pushed by real z-axis shake, always spring-damped
-  // back toward a relaxed resting depth, and it bounces off the front glass (z=0)
-  // and the back wall (z=1) the same way the x/y axes bounce off the real walls.
-  function updateDepth(dtScale){
-    var shaking = (phase === "shaking");
-    var rest = 0.3;
-    var springK = shaking ? 0.0026 : 0.018;
-    var damp = shaking ? 0.90 : 0.80;
-    ballDepth.forEach(function(d){
-      if (shaking){
-        // jGz (not raw smGz) — see the comment above onDeviceMotion. Using the
-        // high-passed value means this responds to actual front/back shaking
-        // motion instead of whatever constant offset the phone's steady tilt
-        // happens to put on the z-axis.
-        d.vz += (jGz * 0.02 + (Math.random()-0.5) * 0.0016 * clamp(shakeIntensity,0,26)) * dtScale;
-      }
-      d.vz += (rest - d.z) * springK * dtScale;
-      d.vz *= damp;
-      d.z += d.vz * dtScale;
-      if (d.z < 0){ d.z = 0; d.vz *= -0.35; }
-      if (d.z > 1){ d.z = 1; d.vz *= -0.35; }
+    return ballBodies.map(function(b, i){
+      return { x: b.position.x, y: b.position.y, z: b.position.z, color: colorFor(i), textColor: textColorFor(i), label: b.appData.label };
     });
   }
 
   var lastRanking = null;
 
-  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+  // AXIS_SIGN maps each raw device-motion axis onto this 3D world 1:1 (device
+  // x=left/right, y=up/down-along-the-phone, z=out-of-the-screen-toward-you —
+  // exactly world X/Y/Z here), with a per-axis +1/-1 correction. X and Y were
+  // empirically confirmed correct in the earlier 2D version (holding the phone
+  // upright normally must pull balls down, not up — real-device-tested). Z is
+  // new (the old build only used it for a fake depth-spring, never as a real
+  // gravity/kick axis), so its sign is a best guess; the on-screen flip buttons
+  // (flipXBtn/flipYBtn/flipZBtn) let anyone correct any axis in one tap if a
+  // specific device/browser disagrees, instead of needing another round-trip.
+  var AXIS_SIGN = { x: -1, y: 1, z: -1 };
+  (function loadAxisSign(){
+    try {
+      var saved = JSON.parse(localStorage.getItem("luckydrum_axis_sign") || "null");
+      if (saved && typeof saved.x === "number" && typeof saved.y === "number" && typeof saved.z === "number") AXIS_SIGN = saved;
+    } catch(e){}
+  })();
+  function saveAxisSign(){ try { localStorage.setItem("luckydrum_axis_sign", JSON.stringify(AXIS_SIGN)); } catch(e){} }
+  function refreshFlipButtons(){
+    flipXBtn.classList.toggle("flip-on", AXIS_SIGN.x > 0);
+    flipYBtn.classList.toggle("flip-on", AXIS_SIGN.y < 0);
+    flipZBtn.classList.toggle("flip-on", AXIS_SIGN.z > 0);
+  }
+  flipXBtn.addEventListener("click", function(){ AXIS_SIGN.x *= -1; saveAxisSign(); refreshFlipButtons(); });
+  flipYBtn.addEventListener("click", function(){ AXIS_SIGN.y *= -1; saveAxisSign(); refreshFlipButtons(); });
+  flipZBtn.addEventListener("click", function(){ AXIS_SIGN.z *= -1; saveAxisSign(); refreshFlipButtons(); });
+  refreshFlipButtons();
 
-  // REDESIGNED after real-device testing kept surfacing sign/axis problems
-  // (balls floating, then balls slamming into the *ceiling* the instant the
-  // gyro turned on). accelerationIncludingGravity's x/y sign convention for
-  // "phone held upright" has proven unreliable to pin down and inconsistent
-  // in practice, and getting it wrong doesn't fail quietly — it visibly
-  // launches every ball at once, in the same wrong direction, which is
-  // also a big part of why balls looked like they were "stuck together": a
-  // uniform force (right or wrong direction) slamming a whole grid of balls
-  // into the same wall at the same instant packs them into a tight cluster
-  // right at that wall, and gravity alone never pushes them apart sideways.
-  //
-  // So gravity direction is no longer derived from the sensor at all. Down is
-  // always straight down on screen, at a constant, deliberately heavy
-  // magnitude — exactly like every simple 2D physics box, with zero chance of
-  // ever pointing the wrong way. Shake strength (from the sensor, but as pure
-  // magnitude — direction never enters into it) only affects how hard
-  // applyShakeAgitation() below throws the balls around; it doesn't touch
-  // gravity itself.
-  var BASE_GRAVITY = 2.6; // well above Matter's own "1 = normal" default — real, obvious weight
+  // Gravity direction follows the phone's slow-changing ORIENTATION (blGx/y/z —
+  // the heavily-smoothed baseline from onDeviceMotion, not the fast smGx/y/z)
+  // rather than being locked straight down. The slow baseline only drifts when
+  // you deliberately reorient the phone, and barely moves during a fast shake —
+  // so gravity stays stable and correct while shaking, and only actually
+  // changes when you mean it to (tilt it, flip it over, tip it forward/back).
+  var BASE_GRAVITY = 16; // world-units/s^2 — tuned for the ~10-unit box, real obvious weight
   function updateGravityFromSensor(){
-    if (!engine) return;
-    engine.gravity.x = 0;
-    engine.gravity.y = BASE_GRAVITY;
+    if (!world) return;
+    if (sensorActive){
+      var gx = AXIS_SIGN.x*blGx, gy = AXIS_SIGN.y*blGy, gz = AXIS_SIGN.z*blGz;
+      var mag = Math.sqrt(gx*gx + gy*gy + gz*gz);
+      if (mag > 0.6){ // a clear enough tilt to trust a direction
+        world.gravity.set((gx/mag)*BASE_GRAVITY, (gy/mag)*BASE_GRAVITY, (gz/mag)*BASE_GRAVITY);
+      } else { // phone close to flat / ambiguous — default straight down rather than risk a near-zero or noisy direction
+        world.gravity.set(0, -BASE_GRAVITY, 0);
+      }
+    } else {
+      world.gravity.set(0, -BASE_GRAVITY, 0);
+    }
   }
 
   // A shared gravity vector can only ever translate every ball together, in
-  // lockstep, like one solid block — every body feels *exactly* the same
-  // force at the same instant, so it can never by itself be what separates
-  // balls from each other. What actually has to do that job is this function:
-  // a strong, per-ball velocity kick, redrawn every single frame, sized by
-  // how hard the phone is being shaken. Adding directly to velocity (not a
-  // tiny force that has to fight frictionAir for several frames before it's
-  // even visible) is what makes this an immediately visible scatter instead
-  // of a sluggish nudge.
-  //
-  // The kick has two parts blended together: a DIRECTIONAL part (jGx, jGy —
-  // see the comment above onDeviceMotion) that points along whichever axis
-  // you're actually shaking right now, shared by every ball — this is what
-  // makes shaking side-to-side visibly throw balls left-right, shaking
-  // up-down throw them up-down, etc. — plus a fully independent RANDOM part
-  // per ball, which is still needed so balls scatter from and bounce off each
-  // other instead of moving as one rigid block even while sharing the same
-  // overall shake direction. Runs for the whole "shaking" phase regardless of
-  // whether we have a real sensor reading or the press-and-hold fallback
-  // (which has no directional signal, so it falls back to pure random).
+  // lockstep, like one solid block. What actually separates balls from each
+  // other is this function: a strong, per-ball velocity kick, redrawn every
+  // frame, sized by how hard the phone is being shaken, blending a DIRECTIONAL
+  // part (jGx/jGy/jGz — see the comment above onDeviceMotion, using the same
+  // AXIS_SIGN as gravity so a shake along any axis throws balls the same way
+  // tilting that axis would pull them) shared by every ball, with a fully
+  // independent RANDOM part per ball so they scatter and bounce off each other
+  // instead of moving as one rigid block.
   function applyShakeAgitation(dtScale){
-    var M = Matter;
     var mag = clamp(shakeIntensity, 0, 26);
-    var kick = mag * 0.55 * dtScale;
-    var bmag = Math.sqrt(jGx*jGx + jGy*jGy);
+    var kick = mag * 0.11 * dtScale;
+    var jx = AXIS_SIGN.x*jGx, jy = AXIS_SIGN.y*jGy, jz = AXIS_SIGN.z*jGz;
+    var bmag = Math.sqrt(jx*jx + jy*jy + jz*jz);
     var haveDirection = sensorActive && bmag > 0.35;
-    var dirX = haveDirection ? (-jGx / bmag) : 0; // sign matches the world.x flip used everywhere else in this file
-    var dirY = haveDirection ? (jGy / bmag) : 0;
-    var DIRECTIONAL_BIAS = haveDirection ? 0.65 : 0; // 0 = pure random, 1 = fully locked to the shake axis
+    var dirX = haveDirection ? jx/bmag : 0;
+    var dirY = haveDirection ? jy/bmag : 0;
+    var dirZ = haveDirection ? jz/bmag : 0;
+    var BIAS = haveDirection ? 0.65 : 0; // 0 = pure random, 1 = fully locked to the shake axis
     ballBodies.forEach(function(b){
-      var v = b.velocity;
-      var rx = (Math.random()-0.5)*2, ry = (Math.random()-0.5)*2;
-      var kx = (dirX*DIRECTIONAL_BIAS + rx*(1-DIRECTIONAL_BIAS)) * kick;
-      var ky = (dirY*DIRECTIONAL_BIAS + ry*(1-DIRECTIONAL_BIAS)) * kick;
-      M.Body.setVelocity(b, { x: v.x + kx, y: v.y + ky });
+      var rx = (Math.random()-0.5)*2, ry = (Math.random()-0.5)*2, rz = (Math.random()-0.5)*2;
+      b.velocity.x += (dirX*BIAS + rx*(1-BIAS)) * kick;
+      b.velocity.y += (dirY*BIAS + ry*(1-BIAS)) * kick;
+      b.velocity.z += (dirZ*BIAS + rz*(1-BIAS)) * kick;
     });
   }
 
-  var MAX_BALL_SPEED = 40; // world-units/step safety cap — keeps a snappy feel while still stopping tunneling
+  var MAX_BALL_SPEED = 32; // units/s safety cap — keeps a snappy feel while still stopping tunneling
   function capBallMotion(){
-    var M = Matter;
+    var hw = BOX_W/2, hd = BOX_D/2, margin = 0.05;
     ballBodies.forEach(function(b){
-      var v = b.velocity;
-      var sp = Math.sqrt(v.x*v.x + v.y*v.y);
-      if (sp > MAX_BALL_SPEED){
-        var s = MAX_BALL_SPEED / sp;
-        M.Body.setVelocity(b, { x: v.x*s, y: v.y*s });
-      }
-      // safety net: if a ball ever tunnels past the walls, put it straight back in bounds
-      var p = b.position, r = b.circleRadius, margin = 3;
-      if (p.x < -margin || p.x > WORLD_W+margin || p.y < -margin || p.y > WORLD_H+margin){
-        M.Body.setPosition(b, { x: clamp(p.x, r, WORLD_W-r), y: clamp(p.y, r, WORLD_H-r) });
-        M.Body.setVelocity(b, { x: 0, y: 0 });
+      var v = b.velocity, sp = v.length();
+      if (sp > MAX_BALL_SPEED) v.scale(MAX_BALL_SPEED/sp, v);
+      var p = b.position, r = b.shapes[0].radius;
+      if (p.x < -hw-margin || p.x > hw+margin || p.y < -margin || p.y > BOX_H+margin || p.z < -hd-margin || p.z > hd+margin){
+        p.x = clamp(p.x, -hw+r, hw-r);
+        p.y = clamp(p.y, r, BOX_H-r);
+        p.z = clamp(p.z, -hd+r, hd-r);
+        b.velocity.set(0,0,0);
       }
     });
   }
@@ -977,22 +1146,19 @@
     });
   }
 
-  // DIRECTIONAL SHAKE MODEL. Gravity itself is constant/down-only (see
-  // updateGravityFromSensor above) because accelerationIncludingGravity's
-  // absolute sign for "which way is down" proved unreliable in practice. But
-  // the CHANGE in that reading — how it's moving right now relative to how it
-  // was sitting a moment ago — doesn't have that problem, because it's a
-  // relative delta against the device's own recent history, not a mapping to
-  // an absolute world direction. So we track two smoothings of the same
+  // DIRECTIONAL SHAKE MODEL. Gravity direction now tracks real device
+  // orientation on all three axes (see updateGravityFromSensor above), but the
+  // shake KICK still uses a relative delta against the device's own recent
+  // history rather than an absolute reading, since that's robust to any
+  // remaining sign ambiguity. So we track two smoothings of the same
   // signal: a fast one (smGx/y/z, reacts almost immediately) and a slow one
   // (blGx/y/z, "baseline" — tracks the phone's steady resting orientation).
   // Their difference (jGx/y/z) is a live, self-calibrating measurement of
   // "how far off resting is this axis right now" — which is exactly what
   // "shaking mostly left-right" vs "mostly up-down" vs "mostly toward/away
-  // from you" looks like, per axis, without ever needing to know which way is
-  // absolute "down". applyShakeAgitation() below uses jGx/jGy to steer the
-  // per-ball kicks toward whichever axis you're actually shaking along, and
-  // updateDepth() uses jGz the same way for front/back (into/out of the box).
+  // from you" looks like, per axis. applyShakeAgitation() above uses
+  // jGx/jGy/jGz together (all three axes, symmetrically) to steer the
+  // per-ball kicks toward whichever axis you're actually shaking along.
   var GDIV = 9.81; // 1g, informational — how far a reading departs from "just sitting there at 1g"
   var smGx = 0, smGy = 0, smGz = 0;       // fast smoothing — near-instant
   var blGx = 0, blGy = 0, blGz = 0;       // slow smoothing — "resting" baseline
@@ -1071,7 +1237,7 @@
     // applying real weight right now" is a directly visible number, not a guess
     if (sensorActive && now - lastDebugPaint > 120){
       lastDebugPaint = now;
-      var gTxt = engine ? (engine.gravity.x.toFixed(2) + ", " + engine.gravity.y.toFixed(2)) : "-";
+      var gTxt = world ? (world.gravity.x.toFixed(2) + ", " + world.gravity.y.toFixed(2) + ", " + world.gravity.z.toFixed(2)) : "-";
       sensorNote.textContent = "자이로: 연결됨 · 이벤트 " + motionEventCount +
         "개 · 편차 " + mag.toFixed(1) + " · g(" + smGx.toFixed(1) + ", " + smGy.toFixed(1) + ", " + smGz.toFixed(1) + ") · 적용중력(" + gTxt + ")";
     }
@@ -1084,11 +1250,11 @@
     var dt = Math.min(34, ts - lastFrame);
     lastFrame = ts;
     requestAnimationFrame(controllerLoop);
-    if (role !== "controller" || !engine) return;
+    if (role !== "controller" || !world) return;
 
     if (fallbackHold && !sensorActive){ registerIntensity(18); }
 
-    updateGravityFromSensor(); // constant, always straight down — see comment above the function
+    updateGravityFromSensor(); // follows slow phone orientation — see comment above the function
 
     if (phase === "shaking"){
       applyShakeAgitation(dt/16.67); // strong independent per-ball scatter — see comment above the function
@@ -1098,14 +1264,13 @@
       }
     }
 
-    Matter.Engine.update(engine, dt);
+    world.step(1/60, Math.min(0.034, dt/1000), 6);
     capBallMotion();
-    updateDepth(dt/16.67);
     balls = composeBalls();
 
     if (phase === "settling"){
       var maxSpeed = 0;
-      ballBodies.forEach(function(b){ maxSpeed = Math.max(maxSpeed, b.speed); });
+      ballBodies.forEach(function(b){ maxSpeed = Math.max(maxSpeed, b.velocity.length()); });
       var quiet = maxSpeed < SETTLE_SPEED;
       if (quiet){
         if (!settleQuietSinceAt) settleQuietSinceAt = performance.now();
@@ -1119,7 +1284,7 @@
       settleStartedAt = 0;
     }
 
-    drawScene();
+    render3D();
     drawDebugGraph();
 
     tickAccum += dt;
@@ -1130,11 +1295,13 @@
   }
   var settleStartedAt = 0, tickAccum = 0;
 
+  // Full lineup ranking (전체 줄세우기): where a ball finally rests along the
+  // box's left-right (X) axis — the axis the camera/viewer actually sees —
+  // decides its place in line, left to right.
   function finishRound(){
     var ranked = ballBodies.slice().sort(function(a,b){
-      if (Math.abs(a.position.x - b.position.x) > 2) return a.position.x - b.position.x;
-      return a.position.y - b.position.y;
-    }).map(function(b){ return b.plugin.name; });
+      return a.position.x - b.position.x;
+    }).map(function(b){ return b.appData.name; });
     lastRanking = ranked;
     setPhase("done");
     showResult(ranked, true);
@@ -1142,10 +1309,9 @@
   }
 
   reshuffleBtn.addEventListener("click", function(){
-    if (!engine) return;
-    var M = Matter;
+    if (!world) return;
     ballBodies.forEach(function(b){
-      M.Body.setVelocity(b, { x:(Math.random()-0.5)*10, y:(Math.random()-0.5)*10 - 4 });
+      b.velocity.set((Math.random()-0.5)*9, Math.random()*6+2, (Math.random()-0.5)*9);
     });
     lastRanking = null;
     resultActions.classList.add("hidden");
@@ -1167,91 +1333,16 @@
     requestAnimationFrame(viewerLoop);
     if (role === "controller") return;
     if (curSnap){
-      var n = roster.length;
-      var r = radiusFor(n);
       var frac = prevSnap ? Math.min(1, (performance.now() - curSnap.t) / TICK_MS) : 1;
       balls = curSnap.b.map(function(cur, i){
         var prev = prevSnap && prevSnap.b[i] ? prevSnap.b[i] : cur;
         var x = prev[0] + (cur[0]-prev[0]) * frac;
         var y = prev[1] + (cur[1]-prev[1]) * frac;
-        var z = (prev[3]!=null ? prev[3] : (cur[3]||0)) + ((cur[3]||0) - (prev[3]!=null?prev[3]:(cur[3]||0))) * frac;
-        return { x:x, y:y, a:cur[2], r:r, z:z, color: colorFor(i), textColor: textColorFor(i), label: labelFor(roster[i]||"") };
+        var z = prev[2] + (cur[2]-prev[2]) * frac;
+        return { x:x, y:y, z:z, color: colorFor(i), textColor: textColorFor(i), label: labelFor(roster[i]||"") };
       });
     }
-    drawScene();
-  }
-
-  /* ============================= drawing ============================= */
-  // A simple line-drawn open box (outer frame + a smaller receded back rectangle,
-  // joined at the corners) — the classic flat "box" icon construction. It reads as
-  // a real enclosed volume without any shading or gradient, just hairlines, and it
-  // sits exactly on the physics world bounds so the drawn walls are the real ones.
-  function drawBoxWireframe(){
-    var bx0 = BOX_BACK.x0, by0 = BOX_BACK.y0, bx1 = BOX_BACK.x1, by1 = BOX_BACK.y1;
-    ctx.strokeStyle = "#15161A";
-    ctx.lineWidth = 2.5;
-    ctx.strokeRect(bx0, by0, bx1-bx0, by1-by0);
-    ctx.beginPath();
-    ctx.moveTo(bx0, by0); ctx.lineTo(0, 0);
-    ctx.moveTo(bx1, by0); ctx.lineTo(WORLD_W, 0);
-    ctx.moveTo(bx0, by1); ctx.lineTo(0, WORLD_H);
-    ctx.moveTo(bx1, by1); ctx.lineTo(WORLD_W, WORLD_H);
-    ctx.stroke();
-    // floor line (front bottom edge, closest to viewer)
-    ctx.strokeStyle = "rgba(21,22,26,.35)";
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, WORLD_H-1); ctx.lineTo(WORLD_W, WORLD_H-1); ctx.stroke();
-  }
-
-  // Projects a true (x,y,r) physics position toward the back rectangle by depth z
-  // (0 = front glass, at its real position; 1 = pressed against the back wall).
-  function projectDepth(px, py, r, z){
-    z = z || 0;
-    var backX = BOX_BACK.x0 + (px/WORLD_W) * (BOX_BACK.x1-BOX_BACK.x0);
-    var backY = BOX_BACK.y0 + (py/WORLD_H) * (BOX_BACK.y1-BOX_BACK.y0);
-    var scale = 1 + (((BOX_BACK_SCALE_X+BOX_BACK_SCALE_Y)/2) - 1) * z;
-    return {
-      x: px + (backX-px) * z,
-      y: py + (backY-py) * z,
-      r: r * scale
-    };
-  }
-
-  function drawScene(){
-    var w = canvas.width, h = canvas.height;
-    if (!w || !h) return;
-    ctx.clearRect(0,0,w,h);
-    var scale = Math.min(w/WORLD_W, h/WORLD_H);
-    var offX = (w - WORLD_W*scale)/2, offY = (h - WORLD_H*scale)/2;
-    ctx.save();
-    ctx.translate(offX, offY);
-    ctx.scale(scale, scale);
-
-    drawBoxWireframe();
-
-    // draw far (larger z) balls first so nearer ones correctly occlude them —
-    // this, plus the size/position shift, is what actually reads as depth
-    var ordered = balls.slice().sort(function(a,b){ return (b.z||0) - (a.z||0); });
-    ordered.forEach(function(b){
-      var p = projectDepth(b.x, b.y, b.r, b.z);
-      ctx.save();
-      ctx.globalAlpha = 1 - (b.z||0) * 0.30; // farther balls fade slightly — an atmospheric depth cue, not a gradient fill
-      ctx.translate(p.x, p.y);
-      ctx.rotate(b.a || 0);
-      // flat fill, thin black hairline — no gradient, no gloss
-      ctx.fillStyle = b.color;
-      ctx.beginPath(); ctx.arc(0,0,p.r,0,Math.PI*2); ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "#15161A";
-      ctx.stroke();
-      ctx.rotate(-(b.a||0));
-      ctx.fillStyle = b.textColor || "#15161A";
-      ctx.font = "700 " + Math.max(10, p.r*0.62) + "px 'JetBrains Mono', monospace";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(b.label, 0, 0.5);
-      ctx.restore();
-    });
-    ctx.restore();
+    render3D();
   }
 
   /* ============================= phase / result UI ============================= */
