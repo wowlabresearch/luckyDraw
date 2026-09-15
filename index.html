@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>럭키 드럼</title>
+<title>LUCKY DRAW</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap">
 <style>
   :root{
@@ -247,7 +247,7 @@
   <div class="top">
     <div class="brand">
       <span class="eyebrow">SHAKE &amp; DRAW</span>
-      <h1>럭키 드럼</h1>
+      <h1>LUCKY DRAW</h1>
     </div>
     <div class="status-strip">
       <span class="pill"><i class="dot" id="dotController"></i>컨트롤러 <span id="cntController">0</span></span>
@@ -259,18 +259,15 @@
   <!-- SETUP -->
   <section class="card setup" id="setupCard">
     <h2>명단을 넣고 흔들 준비를 하세요</h2>
-    <p>흔들기 담당(폰)은 명단을 붙여넣고 시작하면 연결 코드가 생성돼요. 관전(랩탑 등)은 그 코드를 입력하면 실시간으로 같은 화면을 그대로 보여드려요.</p>
 
     <div class="role-grid">
       <button class="role-btn" id="pickController" type="button">
         <div class="r-icon">📱</div>
         <div class="r-title">흔들기 담당</div>
-        <div class="r-desc">이 기기를 흔들어 자이로 센서로 공을 움직입니다. 보통 폰에서 선택하세요.</div>
       </button>
       <button class="role-btn" id="pickViewer" type="button">
         <div class="r-icon">🖥️</div>
         <div class="r-title">관전만 하기</div>
-        <div class="r-desc">흔드는 화면을 실시간으로 그대로 보여줍니다. 랩탑·다른 폰에서 선택하세요.</div>
       </button>
     </div>
 
@@ -308,7 +305,6 @@
           <span>연결 코드</span>
           <span class="code-big" id="peerCodeText">생성 중…</span>
           <button class="btn btn-ghost" id="copyCodeBtn" type="button">코드 복사</button>
-          <span class="hint">관전 기기에서 이 코드를 입력하세요</span>
         </div>
         <div class="shake-row">
           <button id="shakeBtn">탭해서 자이로 켜기</button>
@@ -321,7 +317,6 @@
         </div>
         <div class="sensor-note" id="sensorNote">자이로 센서: 확인 중…</div>
         <div class="deck-controls">
-          <span class="sensor-note" style="align-self:center;">중력/흔들림 방향이 반대로 느껴지면:</span>
           <button class="btn btn-ghost" id="flipXBtn" type="button">X 반전</button>
           <button class="btn btn-ghost" id="flipYBtn" type="button">Y 반전</button>
           <button class="btn btn-ghost" id="flipZBtn" type="button">Z 반전</button>
@@ -331,14 +326,12 @@
             <span><i class="sw" style="background:#FF3B2F"></i>X</span>
             <span><i class="sw" style="background:#1E4FFF"></i>Y</span>
             <span><i class="sw" style="background:#00A66C"></i>Z</span>
-            <span class="debug-hint">실시간 가속도 (디버그)</span>
           </div>
           <canvas id="debugGraph" height="90"></canvas>
         </div>
-        <div class="sensor-note">iOS에서 흔드는 도중 "실행 취소" 팝업이 뜨면 설정 → 손쉬운 사용 → 터치 → "흔들어서 실행 취소"를 꺼주세요.</div>
       </div>
 
-      <div class="viewer-note hidden" id="viewerNote">관전 모드 · 컨트롤러가 흔드는 대로 실시간으로 보여드려요</div>
+      <div class="viewer-note hidden" id="viewerNote">관전 모드</div>
     </div>
 
     <aside class="sidebar">
@@ -355,7 +348,7 @@
           <button class="btn" id="copyResultBtn">순위 복사</button>
         </div>
       </div>
-      <button class="link-reset" id="fullResetBtn">전체 초기화 (명단 처음부터)</button>
+      <button class="link-reset" id="fullResetBtn">전체 초기화</button>
     </aside>
   </section>
 
@@ -814,8 +807,12 @@
     renderer3D.shadowMap.enabled = true;
     renderer3D.shadowMap.type = THREE.PCFShadowMap; // crisper edges than soft PCF — matches the flat, hairline design
 
-    scene3D.add(new THREE.AmbientLight(0xffffff, 0.62));
-    dirLight3D = new THREE.DirectionalLight(0xffffff, 0.85);
+    // Lower ambient / brighter directional than a "flat" scene would use — a
+    // matte, evenly-lit ball reads as soft foam; a sharp directional highlight
+    // against darker shading is what makes a sphere look like a hard, dense
+    // object instead.
+    scene3D.add(new THREE.AmbientLight(0xffffff, 0.42));
+    dirLight3D = new THREE.DirectionalLight(0xffffff, 1.15);
     dirLight3D.position.set(BOX_W*0.35, BOX_H*2.4, BOX_D*1.15);
     dirLight3D.target.position.set(0, BOX_H*0.25, 0);
     dirLight3D.castShadow = true;
@@ -868,8 +865,12 @@
     if (!OUTLINE_GEO_CACHE[k]) OUTLINE_GEO_CACHE[k] = new THREE.SphereGeometry(r*1.06, 14, 10);
     return OUTLINE_GEO_CACHE[k];
   }
+  // Low roughness + a touch of metalness is what separates a hard, glossy
+  // billiard ball from a matte styrofoam one visually — a fully matte sphere
+  // (roughness ~1) looks soft and foam-like under any lighting, regardless of
+  // how the physics underneath actually behaves.
   function getBallMat(hex){
-    if (!BALL_MAT_CACHE[hex]) BALL_MAT_CACHE[hex] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.95, metalness: 0 });
+    if (!BALL_MAT_CACHE[hex]) BALL_MAT_CACHE[hex] = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.22, metalness: 0.12 });
     return BALL_MAT_CACHE[hex];
   }
   // Labels are camera-facing sprites, not a texture wrapped around the (freely
@@ -949,18 +950,18 @@
     world = new CANNON.World();
     world.gravity.set(0, -BASE_GRAVITY, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
-    world.solver.iterations = 16; // higher than default — needed for the stiff, billiard-ball-hard contacts below to stay stable
+    world.solver.iterations = 20; // higher than default — needed for the very stiff, billiard-ball-hard contacts below to stay stable
 
     var wallMat = new CANNON.Material("wall");
     var ballMat = new CANNON.Material("ball");
-    // BILLIARD BALL pass: high stiffness + low relaxation makes contacts resolve
-    // in a sharp, hard "click" instead of a soft, springy squish — that crispness
-    // reads as weight and solidity far more than restitution alone does. High
-    // restitution + low friction on top means a hit ball snaps away immediately
-    // and keeps most of its speed, instead of dying into the pile it hit.
-    var HARD_CONTACT = { contactEquationStiffness: 5e7, contactEquationRelaxation: 2 };
-    world.addContactMaterial(new CANNON.ContactMaterial(wallMat, ballMat, Object.assign({ friction: 0.05, restitution: 0.82 }, HARD_CONTACT)));
-    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, ballMat, Object.assign({ friction: 0.02, restitution: 0.90 }, HARD_CONTACT)));
+    // BILLIARD BALL pass (round 2 — pushed much further than the first pass,
+    // which still read as soft/styrofoam): very high stiffness + very low
+    // relaxation makes contacts resolve in a sharp, hard "click" instead of a
+    // soft, springy squish. High restitution + low friction on top means a hit
+    // ball snaps away immediately and keeps nearly all its speed.
+    var HARD_CONTACT = { contactEquationStiffness: 1e8, contactEquationRelaxation: 1 };
+    world.addContactMaterial(new CANNON.ContactMaterial(wallMat, ballMat, Object.assign({ friction: 0.05, restitution: 0.85 }, HARD_CONTACT)));
+    world.addContactMaterial(new CANNON.ContactMaterial(ballMat, ballMat, Object.assign({ friction: 0.02, restitution: 0.93 }, HARD_CONTACT)));
 
     var hw = BOX_W/2, hd = BOX_D/2;
     function addWall(px, py, pz, axis, angle){
@@ -993,11 +994,12 @@
       // reads as "weight" in a pile of balls being thrown around (gravity itself
       // is mass-independent, so this has to come from the bodies themselves).
       // BALL_DENSITY is tuned high, like a solid resin billiard ball, not a hollow
-      // plastic one — and linearDamping is kept very low so once a ball is moving
-      // it keeps moving, instead of visibly dragging to a stop mid-air.
-      var BALL_DENSITY = 3.2;
+      // plastic one — and damping is zeroed out entirely so nothing ever looks
+      // like it's "drifting to a stop" mid-air; only real wall/ball contacts
+      // (restitution < 1, friction) bleed off energy and let a round settle.
+      var BALL_DENSITY = 5.5;
       var mass = Math.max(0.5, BALL_DENSITY * (4/3) * Math.PI * r*r*r);
-      var body = new CANNON.Body({ mass: mass, shape: new CANNON.Sphere(r), material: ballMat, linearDamping: 0.015, angularDamping: 0.15, allowSleep: false });
+      var body = new CANNON.Body({ mass: mass, shape: new CANNON.Sphere(r), material: ballMat, linearDamping: 0, angularDamping: 0.05, allowSleep: false });
       body.position.set(x, y, z);
       body.appData = { name: name, label: labelFor(name) };
       world.addBody(body);
@@ -1052,7 +1054,7 @@
   // you deliberately reorient the phone, and barely moves during a fast shake —
   // so gravity stays stable and correct while shaking, and only actually
   // changes when you mean it to (tilt it, flip it over, tip it forward/back).
-  var BASE_GRAVITY = 30; // world-units/s^2 — pushed well past the first pass: a fast, obvious fall reads as "heavy", a slow drift reads as "floaty"
+  var BASE_GRAVITY = 55; // world-units/s^2 — pushed hard again: the first pass (30) still read as floaty. Fast, obvious fall = heavy; slow drift = styrofoam.
   function updateGravityFromSensor(){
     if (!world) return;
     if (sensorActive){
@@ -1079,17 +1081,17 @@
   // instead of moving as one rigid block.
   function applyShakeAgitation(dtScale){
     var mag = clamp(shakeIntensity, 0, 26);
-    // Snappy on purpose: a hard shake should slam balls to top speed in 2-3
-    // frames, not ramp up over half a second — that immediacy is a big part
-    // of "weight" (a heavy object hit hard moves NOW, it doesn't ease in).
-    var kick = mag * 0.42 * dtScale;
+    // Snappy on purpose, pushed much harder than the first pass: a hard shake
+    // should slam balls to top speed in 1-2 frames, not ease in over half a
+    // second — that immediacy IS "weight" (a heavy object hit hard moves NOW).
+    var kick = mag * 1.1 * dtScale;
     var jx = AXIS_SIGN.x*jGx, jy = AXIS_SIGN.y*jGy, jz = AXIS_SIGN.z*jGz;
     var bmag = Math.sqrt(jx*jx + jy*jy + jz*jz);
     var haveDirection = sensorActive && bmag > 0.35;
     var dirX = haveDirection ? jx/bmag : 0;
     var dirY = haveDirection ? jy/bmag : 0;
     var dirZ = haveDirection ? jz/bmag : 0;
-    var BIAS = haveDirection ? 0.65 : 0; // 0 = pure random, 1 = fully locked to the shake axis
+    var BIAS = haveDirection ? 0.8 : 0; // 0 = pure random, 1 = fully locked to the shake axis
     ballBodies.forEach(function(b){
       var rx = (Math.random()-0.5)*2, ry = (Math.random()-0.5)*2, rz = (Math.random()-0.5)*2;
       b.velocity.x += (dirX*BIAS + rx*(1-BIAS)) * kick;
@@ -1098,7 +1100,7 @@
     });
   }
 
-  var MAX_BALL_SPEED = 46; // units/s safety cap — raised so a hard shake isn't artificially ceilinged before it feels forceful
+  var MAX_BALL_SPEED = 70; // units/s safety cap — raised again so a hard shake isn't artificially ceilinged before it feels forceful
   function capBallMotion(){
     var hw = BOX_W/2, hd = BOX_D/2, margin = 0.05;
     ballBodies.forEach(function(b){
